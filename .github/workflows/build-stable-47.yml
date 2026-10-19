@@ -106,15 +106,16 @@ jobs:
           echo "版本号: $VERSION"
       # 如果有签名密钥，写入密钥文件
       - name: 🔑 写入签名密钥
-        if: ${{ env.SIGN_KEYSTORE_BASE64 != '' }}
+        if: ${{ secrets.SIGN_KEYSTORE_BASE64 != '' }}
         env:
           SIGN_KEYSTORE_BASE64: ${{ secrets.SIGN_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           echo "$SIGN_KEYSTORE_BASE64" | base64 --decode > android/app/key.jks
-          echo "storeFile=key.jks" >> android/key.properties
-          echo "storePassword=${{ secrets.KEYSTORE_PASSWORD }}" >> android/key.properties
-          echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> android/key.properties
-          echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> android/key.properties
+          printf 'storeFile=key.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+            "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > android/key.properties
           echo "✅ 签名配置已写入"
       - name: 🏗️ 构建 APK
         run: flutter build apk --release --split-per-abi
