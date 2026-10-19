@@ -98,7 +98,8 @@ class BackgroundOverlay(
             hide()
             return
         }
-        val seconds = ((runtime.setting("completionSeconds") as? Number)?.toLong() ?: 60).coerceIn(0, 900)
+        val seconds = if (islandMode) 3L else
+            ((runtime.setting("completionSeconds") as? Number)?.toLong() ?: 60).coerceIn(0, 900)
         val finish = completed
         if (finish != null) {
             val remaining = finish.finishedAt + seconds * 1000 - System.currentTimeMillis()
@@ -108,7 +109,8 @@ class BackgroundOverlay(
         if (task == null) { hide(); return }
         current = task
         try {
-            val next = BackgroundOverlayAppearance(runtime.setting("overlayAppearance") as? Map<*, *> ?: emptyMap<String, Any>())
+            val next = if (islandMode) islandAppearance() else
+                BackgroundOverlayAppearance(runtime.setting("overlayAppearance") as? Map<*, *> ?: emptyMap<String, Any>())
             val availableWidth = context.resources.displayMetrics.widthPixels / context.resources.displayMetrics.density - 16f
             val nextGeometry = next.layout(availableWidth)
             if (next != appearance || nextGeometry != geometry || createdIsland != islandMode) {
@@ -145,7 +147,7 @@ class BackgroundOverlay(
     private fun create(islandMode: Boolean) {
         createdIsland = islandMode
         val dark = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
-        val foreground = if (dark) Color.WHITE else Color.rgb(30, 32, 38)
+        val foreground = if (dark || islandMode) Color.WHITE else Color.rgb(30, 32, 38)
         val root = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = if (appearance.iconOnly) Gravity.CENTER else Gravity.CENTER_VERTICAL
@@ -153,7 +155,8 @@ class BackgroundOverlay(
             elevation = if (appearance.showBackground) dp(8).toFloat() else 0f
             if (appearance.showBackground || appearance.showBorder) background = GradientDrawable().apply {
                 setColor(if (!appearance.showBackground) Color.TRANSPARENT else
-                    if (dark) Color.rgb(31, 33, 39) else Color.rgb(249, 250, 253))
+                    if (islandMode) Color.rgb(16, 17, 20)
+                    else if (dark) Color.rgb(31, 33, 39) else Color.rgb(249, 250, 253))
                 cornerRadius = dp(appearance.cornerRadius).toFloat()
                 if (appearance.showBorder) setStroke(dp(1), if (dark) Color.rgb(93, 97, 107) else Color.rgb(200, 204, 213))
             }
@@ -267,6 +270,24 @@ class BackgroundOverlay(
             root.animate().alpha(1f).translationY(0f).setDuration(190).start()
         }
     }
+
+    /** The foreground capsule is a fixed compact pill, independent of the
+     * draggable background overlay the user styles in settings. */
+    private fun islandAppearance() = BackgroundOverlayAppearance(mapOf(
+        "width" to 186f,
+        "height" to 44f,
+        "cornerRadius" to 22f,
+        "iconSize" to 24f,
+        "progressSize" to 28f,
+        "progressStrokeWidth" to 2f,
+        "showProgress" to true,
+        "showTitle" to true,
+        "showSubtitle" to false,
+        "showTime" to false,
+        "showClose" to false,
+        "showBackground" to true,
+        "showBorder" to false,
+    ))
 
     private fun statusBarHeight(): Int {
         val id = context.resources.getIdentifier("status_bar_height", "dimen", "android")
