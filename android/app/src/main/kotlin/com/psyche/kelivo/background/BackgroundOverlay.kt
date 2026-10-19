@@ -206,7 +206,9 @@ class BackgroundOverlay(
             if (islandMode) {
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
                 x = 0
-                y = statusBarHeight() + dp(6)
+                // Leave room for OEM status-bar islands (OriginOS 原子岛, MIUI
+                // 焦点通知) which are drawn in a layer above app overlays.
+                y = statusBarHeight() + dp(28)
             } else {
                 gravity = Gravity.TOP or Gravity.START
                 x = prefs.getInt("overlay_x", dp(8))
