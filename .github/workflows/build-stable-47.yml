@@ -710,3 +710,4 @@ jobs:
         with:
           name: Linux-RPM
           path: Kelivo_linux_*.rpm
+# re-register workflow
