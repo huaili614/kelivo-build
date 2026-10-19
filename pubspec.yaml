@@ -163,6 +163,11 @@ dev_dependencies:
   url_launcher_platform_interface: ^2.3.2
   vm_service: ^15.3.0
 dependency_overrides:
+  # 2.5.0 moved the plugin's Pigeon methods to suspend functions, so a Dart
+  # side built against 2.4.x resolves a native method that no longer exists
+  # (NoSuchMethodError on SharedPreferencesPlugin.getAll). Keep both halves
+  # on the last 2.4 release.
+  shared_preferences_android: 2.4.28
   # Prevent the location from being accessed continuously on Windows
   permission_handler_windows:
     path: ./dependencies/flutter-permission-handler/permission_handler_windows

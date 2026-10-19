@@ -83,14 +83,13 @@ jobs:
         with:
           distribution: 'zulu'
           java-version: '17'
-          cache: 'gradle'
 
       - name: 🐦 安装 Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
-          cache: true
+          cache: false
 
       - name: 📝 Inject fallback
         shell: bash
@@ -117,8 +116,12 @@ jobs:
           printf 'storeFile=key.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
             "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > android/key.properties
           echo "✅ 签名配置已写入"
+      - name: 📋 打印关键依赖版本
+        run: |
+          grep -A2 -E '^  shared_preferences' pubspec.lock || true
+
       - name: 🏗️ 构建 APK
-        run: flutter build apk --release --split-per-abi
+        run: flutter clean && flutter build apk --release --split-per-abi
 
       - name: 📦 重命名 APK
         run: |
