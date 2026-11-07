@@ -7,31 +7,106 @@ import 'package:Kelivo/utils/svg_preview_html.dart';
 import 'package:Kelivo/shared/widgets/plantuml_block.dart';
 import 'package:Kelivo/shared/widgets/export_capture_scope.dart';
 
+import 'package:Kelivo/features/intelligent_ui/host/ui_markdown_builder.dart';
+
 import 'citation_syntax.dart';
+import 'quote_syntax.dart';
 import 'diagram_code_blocks.dart';
 import 'highlight_adapter.dart';
-import 'link_image_handlers.dart';
+import 'markdown_image_sources.dart';
 import 'markdown_actions.dart';
+import 'link_image_handlers.dart';
+import 'math_adapter.dart';
 
 // Stable registration identity preserves the parser and completed prefix trees.
-final kelivoMarkdownExtensions = MarkstreamExtensions(
-  inlineSyntaxes: const [CitationSyntax(), LocalImagePathSyntax()],
-  namedInlineBuilders: {'kelivo-citation': buildCitation},
-  codeBlockBuilders: {
-    'mermaid': _diagram,
-    'svg': _diagram,
-    'xml': _diagram,
-    'html': _diagram,
-    'htm': _diagram,
-    'rawhtml': _diagram,
-    'raw_html': _diagram,
-    'plantuml': _plantUml,
-  },
-  actionButtonBuilder: markdownActionButton,
-  codeExtraActions: markdownCodeActions,
-  tableExtraActions: markdownTableActions,
-  mobileTableToolbarBuilder: markdownMobileTableToolbar,
+final kelivoMarkdownExtensions = _extensions();
+final _quotedMarkdownExtensions = _extensions(
+  literalSpanBuilder: buildQuoteLiteralSpan,
 );
+
+MarkstreamExtensions markdownExtensionsFor(BuildContext context) =>
+    QuoteRenderScope.of(context)?.quotes.isNotEmpty == true
+    ? _quotedMarkdownExtensions
+    : kelivoMarkdownExtensions;
+
+MarkstreamExtensions _extensions({LiteralSpanBuilder? literalSpanBuilder}) =>
+    MarkstreamExtensions(
+      inlineSyntaxes: const [
+        CitationSyntax(),
+        LocalImagePathSyntax(),
+        QuoteSyntax(),
+      ],
+      namedInlineBuilders: {
+        'kelivo-citation': buildCitation,
+        'kelivo-quote': buildQuoteInline,
+      },
+      codeBlockBuilders: {
+        'kelivo-ui': _nativeUi,
+        'kelivo-web': _nativeUi,
+        'math': _math,
+        'mermaid': _diagram,
+        'svg': _diagram,
+        'xml': _diagram,
+        'html': _diagram,
+        'htm': _diagram,
+        'rawhtml': _diagram,
+        'raw_html': _diagram,
+        'plantuml': _plantUml,
+      },
+      actionButtonBuilder: markdownActionButton,
+      codeExtraActions: markdownCodeActions,
+      tableExtraActions: markdownTableActions,
+      mobileTableToolbarBuilder: markdownMobileTableToolbar,
+      literalSpanBuilder: literalSpanBuilder,
+    );
+
+Widget _nativeUi(
+  BuildContext context,
+  CodeBlockNode node,
+  MarkstreamRenderContext rendering,
+) => UiMarkdownBlock(
+  node: node,
+  rendering: rendering,
+  linkHandler: const KelivoLinkHandler(),
+  sourceBuilder: (context) => MarkstreamCodeBlock(
+    node: node,
+    theme: rendering.theme,
+    extensions: markdownExtensionsFor(context),
+    options: markdownCodeOptions(context.watch<SettingsProvider>()),
+    labels: markdownLabels(context),
+    highlighter: KelivoCodeHighlighter.forTheme(rendering.theme),
+    streaming: rendering.streaming,
+    exporting: ExportCaptureScope.of(context),
+  ),
+);
+
+Widget _math(
+  BuildContext context,
+  CodeBlockNode node,
+  MarkstreamRenderContext rendering,
+) {
+  final settings = context.watch<SettingsProvider>();
+  final fallback = MarkstreamCodeBlock(
+    node: node,
+    theme: rendering.theme,
+    extensions: markdownExtensionsFor(context),
+    options: markdownCodeOptions(settings),
+    labels: markdownLabels(context),
+    highlighter: KelivoCodeHighlighter.forTheme(rendering.theme),
+    streaming: rendering.streaming,
+    exporting: ExportCaptureScope.of(context),
+  );
+  if (settings.enableMathRendering &&
+      node.closed &&
+      node.code.trim().isNotEmpty) {
+    return KelivoMathBlock(
+      node: node,
+      theme: rendering.theme,
+      fallback: fallback,
+    );
+  }
+  return fallback;
+}
 
 Widget _diagram(
   BuildContext context,
@@ -52,16 +127,17 @@ Widget _diagram(
   return MarkstreamCodeBlock(
     node: node,
     theme: rendering.theme,
-    extensions: kelivoMarkdownExtensions,
+    extensions: markdownExtensionsFor(context),
     options: markdownCodeOptions(context.watch<SettingsProvider>()),
     labels: markdownLabels(context),
-    highlighter: const KelivoCodeHighlighter(),
+    highlighter: KelivoCodeHighlighter.forTheme(rendering.theme),
     streaming: rendering.streaming,
     exporting: ExportCaptureScope.of(context),
   );
 }
 
 final _expansionState = CodeExpansionState();
+final markdownDetailsExpansionState = DetailsExpansionState();
 CodeBlockOptions markdownCodeOptions(SettingsProvider settings) =>
     CodeBlockOptions(
       autoCollapse: settings.autoCollapseCodeBlock,
@@ -100,13 +176,15 @@ Widget _plantUml(
   final theme = rendering.theme;
   final streaming = rendering.streaming;
   return PlantUMLBlock(
+    theme: theme,
     code: node.code,
     codeBuilder: (_) => MarkstreamCodeContent(
       node: node,
       theme: theme,
       streaming: streaming,
-      highlighter: const KelivoCodeHighlighter(),
+      highlighter: KelivoCodeHighlighter.forTheme(theme),
       wrap: false,
+      literalSpanBuilder: markdownExtensionsFor(context).literalSpanBuilder,
     ),
   );
 }

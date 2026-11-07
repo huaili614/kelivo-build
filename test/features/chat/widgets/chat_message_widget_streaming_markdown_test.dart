@@ -6,6 +6,7 @@ import 'package:Kelivo/features/chat/widgets/chat_message_widget.dart';
 import 'package:Kelivo/features/home/services/ask_user_interaction_service.dart';
 import 'package:Kelivo/features/home/services/tool_approval_service.dart';
 import 'package:Kelivo/l10n/app_localizations.dart';
+import 'package:Kelivo/shared/markdown/citation_syntax.dart';
 import 'package:Kelivo/shared/widgets/mermaid_image_cache.dart';
 import 'package:markstream/markstream.dart';
 import '../../../support/markdown_render_helpers.dart';
@@ -45,6 +46,137 @@ String _allRichTextPlainText(WidgetTester tester) {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  for (final width in [390.0, 1000.0]) {
+    testWidgets(
+      'reasoning preview pauses follow after scrolling up and resumes at bottom $width',
+      (tester) async {
+        tester.view.physicalSize = Size(width, 800);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        var reasoning = List.generate(
+          80,
+          (i) => 'Paragraph $i **bold** text.',
+        ).join('\n\n');
+        late StateSetter rebuild;
+        await tester.pumpWidget(
+          _buildHarness(
+            child: StatefulBuilder(
+              builder: (context, setState) {
+                rebuild = setState;
+                return SizedBox(
+                  width: 360,
+                  child: ChatMessageWidget(
+                    message: ChatMessage(
+                      id: 'review-reasoning-follow',
+                      role: 'assistant',
+                      content: '',
+                      conversationId: 'conversation-1',
+                      isStreaming: true,
+                    ),
+                    reasoningText: reasoning,
+                    reasoningLoading: true,
+                    showModelIcon: false,
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 100));
+        final scrollable = find.byType(Scrollable);
+        expect(scrollable, findsOneWidget);
+        final position = tester.state<ScrollableState>(scrollable).position;
+        expect(position.maxScrollExtent, greaterThan(100));
+        await tester.drag(scrollable, const Offset(0, 65));
+        await tester.pump(const Duration(milliseconds: 500));
+        expect(position.extentAfter, greaterThan(1));
+        final readingOffset = position.pixels;
+        rebuild(() => reasoning += '\n\nA new streaming reasoning paragraph.');
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump(const Duration(milliseconds: 100));
+        final afterUpdate = position.pixels;
+        expect(
+          afterUpdate,
+          moreOrLessEquals(readingOffset, epsilon: 1),
+          reason:
+              'New reasoning must preserve the user reading position after scrolling upward',
+        );
+        position.jumpTo(position.maxScrollExtent);
+        rebuild(() => reasoning += '\n\nFollowing again.');
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump(const Duration(milliseconds: 100));
+        expect(position.extentAfter, lessThanOrEqualTo(1));
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+  }
+
+  testWidgets(
+    'streaming preserves completed citation chips until their indices change',
+    (tester) async {
+      var tail = '';
+      var index = '2';
+      late StateSetter rebuild;
+      await tester.pumpWidget(
+        _buildHarness(
+          child: StatefulBuilder(
+            builder: (context, setState) {
+              rebuild = setState;
+              return ChatMessageWidget(
+                message: ChatMessage(
+                  id: 'streaming-citations',
+                  role: 'assistant',
+                  content: 'See [cite:abc].\n\nTail $tail',
+                  translation: 'Translated [cite:abc].\n\nTail $tail',
+                  conversationId: 'conversation-1',
+                  isStreaming: true,
+                ),
+                // Recreate the tool list too: equal result data must not notify
+                // every cached citation when the stream publishes a new token.
+                toolParts: [
+                  ToolUIPart(
+                    id: 'search',
+                    toolName: 'search_web',
+                    arguments: const {},
+                    content: '{"items":[{"id":"abc","index":"$index"}]}',
+                  ),
+                ],
+                showModelIcon: false,
+              );
+            },
+          ),
+        ),
+      );
+      await tester.pump();
+      final chips = find.descendant(
+        of: find.byType(CitationScope),
+        matching: find.text('2'),
+      );
+      expect(chips, findsNWidgets(2));
+      final initialLabels = tester.widgetList<Text>(chips).toList();
+      for (var i = 0; i < 5; i++) {
+        rebuild(() => tail += 'token ');
+        await tester.pump();
+        final currentLabels = tester.widgetList<Text>(chips).toList();
+        for (var j = 0; j < initialLabels.length; j++) {
+          expect(currentLabels[j], same(initialLabels[j]));
+        }
+      }
+
+      rebuild(() => index = '9');
+      await tester.pump();
+      expect(chips, findsNothing);
+      expect(
+        find.descendant(
+          of: find.byType(CitationScope),
+          matching: find.text('9'),
+        ),
+        findsNWidgets(2),
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 
   for (final width in [390.0, 1000.0]) {
     testWidgets('reasoning overflow retains the renderer at width $width', (

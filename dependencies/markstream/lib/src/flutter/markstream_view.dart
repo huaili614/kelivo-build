@@ -38,6 +38,8 @@ class MarkstreamView extends StatefulWidget {
     this.linkHandler,
     this.cullToViewport = true,
     this.codeOptions = const CodeBlockOptions(),
+    this.detailsExpansionState,
+    this.detailsStateKey,
     this.labels = const MarkstreamLabels(),
     this.exporting = false,
     this.selectionController,
@@ -58,6 +60,11 @@ class MarkstreamView extends StatefulWidget {
   final LinkHandler? linkHandler;
   final bool cullToViewport;
   final CodeBlockOptions codeOptions;
+  final DetailsExpansionState? detailsExpansionState;
+
+  /// Stable identity of this source document across view recycling. Distinct
+  /// source slices must use distinct keys even when their text is identical.
+  final Object? detailsStateKey;
   final MarkstreamLabels labels;
   final bool exporting;
   final MarkstreamSelectionController? selectionController;
@@ -85,6 +92,7 @@ class _MarkstreamViewState extends State<MarkstreamView> {
   Widget? _cachedView;
   DocumentNode? _cachedDocument;
   Object? _cachedSignature;
+  final _localDetailsStateKey = Object();
 
   @override
   void initState() {
@@ -228,6 +236,8 @@ class _MarkstreamViewState extends State<MarkstreamView> {
       widget.imageBuilder,
       widget.linkHandler,
       widget.codeOptions,
+      widget.detailsExpansionState,
+      widget.detailsStateKey,
       widget.labels,
       widget.exporting,
       widget.cullToViewport,
@@ -250,6 +260,8 @@ class _MarkstreamViewState extends State<MarkstreamView> {
       imageBuilder: widget.imageBuilder,
       linkHandler: widget.linkHandler,
       codeOptions: widget.codeOptions,
+      detailsExpansionState: widget.detailsExpansionState,
+      detailsStateKey: widget.detailsStateKey ?? _localDetailsStateKey,
       labels: widget.labels,
       exporting: widget.exporting,
       trackSelection: _binding != null,
@@ -337,6 +349,8 @@ class _MarkstreamViewState extends State<MarkstreamView> {
               widget.imageBuilder,
               widget.linkHandler,
               widget.codeOptions,
+              widget.detailsExpansionState,
+              widget.detailsStateKey,
               widget.labels,
               widget.exporting,
               _binding != null,
@@ -346,7 +360,11 @@ class _MarkstreamViewState extends State<MarkstreamView> {
             itemBuilder: (context, index) => Padding(
               key: ValueKey(entries[index].node.span.start),
               padding: EdgeInsets.only(
-                top: index == 0 ? 0 : theme.blockSpacing,
+                top: index == 0
+                    ? 0
+                    : entries[index - 1].nodes.last is HeadingNode
+                    ? theme.blockSpacing.clamp(0, 8)
+                    : theme.blockSpacing,
               ),
               child: batching && batchable(entries[index].node)
                   ? ParagraphRun(

@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../core/ast/nodes.dart';
@@ -10,6 +11,7 @@ import '../selection/selection_controller.dart';
 import '../interfaces/renderers.dart';
 import '../theme/markstream_theme.dart';
 import 'inline_builder.dart';
+import 'optical_baseline.dart';
 import 'source_highlights.dart';
 import 'streaming_text.dart';
 import 'chrome.dart';
@@ -35,7 +37,10 @@ class MarkstreamRenderer {
   ImageBuilder? imageBuilder;
   LinkHandler? linkHandler;
   late InlineSpanBuilder _inline;
+  MarkstreamRenderer? _blockContentRenderer;
   late CodeBlockOptions codeOptions;
+  DetailsExpansionState? detailsExpansionState;
+  late Object detailsStateKey;
   late MarkstreamLabels labels;
   bool exporting = false;
   bool trackSelection = false;
@@ -50,6 +55,8 @@ class MarkstreamRenderer {
     ImageBuilder? imageBuilder,
     LinkHandler? linkHandler,
     required CodeBlockOptions codeOptions,
+    DetailsExpansionState? detailsExpansionState,
+    required Object detailsStateKey,
     required MarkstreamLabels labels,
     required bool exporting,
     required bool trackSelection,
@@ -63,6 +70,8 @@ class MarkstreamRenderer {
     this.imageBuilder = imageBuilder;
     this.linkHandler = linkHandler;
     this.codeOptions = codeOptions;
+    this.detailsExpansionState = detailsExpansionState;
+    this.detailsStateKey = detailsStateKey;
     this.labels = labels;
     this.exporting = exporting;
     this.trackSelection = trackSelection;
@@ -77,7 +86,36 @@ class MarkstreamRenderer {
       linkHandler: linkHandler,
       highlights: highlights,
     );
+    _updateBlockContent();
   }
+
+  // Keep a live session for nested painted surfaces too. Cached fold/cell
+  // callbacks must read the latest document instead of retaining snapshots.
+  MarkstreamRenderer get _blockContent {
+    if (theme.body.color == theme.colors.ink) return this;
+    if (_blockContentRenderer == null) {
+      _blockContentRenderer = MarkstreamRenderer(recognizerFor);
+      _updateBlockContent();
+    }
+    return _blockContentRenderer!;
+  }
+
+  void _updateBlockContent() => _blockContentRenderer?.update(
+    document: document,
+    theme: theme.blockContentTheme,
+    extensions: extensions,
+    codeHighlighter: codeHighlighter,
+    mathRenderer: mathRenderer,
+    imageBuilder: imageBuilder,
+    linkHandler: linkHandler,
+    codeOptions: codeOptions,
+    detailsExpansionState: detailsExpansionState,
+    detailsStateKey: detailsStateKey,
+    labels: labels,
+    exporting: exporting,
+    trackSelection: trackSelection,
+    highlights: highlights,
+  );
 
   MarkstreamRenderContext contextFor(BuildContext context, bool streaming) =>
       MarkstreamRenderContext(
@@ -146,6 +184,8 @@ class MarkstreamRenderer {
     required bool streaming,
     double? spacing,
     TextStyle? firstStyle,
+    TextStyle? style,
+    int listDepth = 0,
   }) {
     final visible = nodes
         .where((node) => node is! ReferenceDefinitionNode)
@@ -158,13 +198,18 @@ class MarkstreamRenderer {
           Padding(
             key: ValueKey(visible[i].span.start),
             padding: EdgeInsets.only(
-              top: i == 0 ? 0 : spacing ?? theme.blockSpacing,
+              top: i == 0
+                  ? 0
+                  : visible[i - 1] is HeadingNode
+                  ? math.min(spacing ?? theme.blockSpacing, 8)
+                  : spacing ?? theme.blockSpacing,
             ),
             child: build(
               context,
               visible[i],
               streaming: streaming && identical(visible[i], nodes.last),
-              style: i == 0 ? firstStyle : null,
+              style: i == 0 ? firstStyle ?? style : style,
+              listDepth: listDepth,
             ),
           ),
       ],
@@ -176,13 +221,20 @@ class MarkstreamRenderer {
     BlockNode node, {
     required bool streaming,
     TextStyle? style,
+    int listDepth = 0,
   }) => DocumentSelectionGroup(
     node: node,
     separator: node is ListNode ? '\n' : '\n\n',
     prefix: node is TaskItemNode
         ? '${node.radio ? '(' : '['}${node.checked ? 'x' : ' '}${node.radio ? ')' : ']'} '
         : '',
-    child: _build(context, node, streaming: streaming, style: style),
+    child: _build(
+      context,
+      node,
+      streaming: streaming,
+      style: style,
+      listDepth: listDepth,
+    ),
   );
 
   Widget _build(
@@ -190,6 +242,7 @@ class MarkstreamRenderer {
     BlockNode node, {
     required bool streaming,
     TextStyle? style,
+    int listDepth = 0,
   }) {
     final custom = extensions.blockBuilderFor(node);
     if (custom != null) {
@@ -237,7 +290,7 @@ class MarkstreamRenderer {
         labels: labels,
         streaming: streaming,
         exporting: exporting,
-        buildCell: (context, cell, style) => inlineText(
+        buildCell: (context, cell, style) => _blockContent.inlineText(
           context,
           cell,
           cell.children,
@@ -248,6 +301,7 @@ class MarkstreamRenderer {
     if (node is MathBlockNode)
       return MarkstreamMathBlock(
         node: node,
+        tex: node.tex,
         theme: theme,
         renderer: mathRenderer,
       );
@@ -255,6 +309,8 @@ class MarkstreamRenderer {
       final summary = node.children.whereType<DetailsSummaryNode>().firstOrNull;
       return MarkstreamDetailsBlock(
         node: node,
+        expansionState: detailsExpansionState,
+        stateKey: detailsStateKey,
         open: node.open,
         source: node.span.slice(document.source),
         theme: theme,
@@ -262,17 +318,19 @@ class MarkstreamRenderer {
             ? SelectionContainer.disabled(
                 child: Text(labels.details, style: theme.details.summary),
               )
-            : inlineText(
+            : _blockContent.inlineText(
                 context,
                 summary,
                 summary.children,
                 theme.details.summary,
                 streaming: streaming,
               ),
-        body: (context) => children(
+        body: (context) => _blockContent.children(
           context,
           node.children.where((child) => child is! DetailsSummaryNode).toList(),
           streaming: streaming,
+          style: body.copyWith(color: theme.colors.ink2),
+          listDepth: listDepth,
         ),
       );
     }
@@ -323,11 +381,27 @@ class MarkstreamRenderer {
           painter: _QuoteBar(theme.quote, Directionality.of(context)),
           child: Padding(
             padding: theme.quote.padding,
-            child: children(context, node.children, streaming: streaming),
+            child: DefaultTextStyle.merge(
+              style: TextStyle(color: theme.quote.textColor),
+              child: children(
+                context,
+                node.children,
+                streaming: streaming,
+                style: body.copyWith(color: theme.quote.textColor),
+                listDepth: listDepth,
+              ),
+            ),
           ),
         ),
       );
-    if (node is ListNode)
+    if (node is ListNode) {
+      final b = theme.body.fontSize!;
+      final markerWidth = node.ordered
+          ? (node.start + node.children.length - 1).toString().length *
+                    .62 *
+                    b +
+                .5 * b
+          : 20.0;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -335,9 +409,7 @@ class MarkstreamRenderer {
           for (var i = 0; i < node.children.length; i++)
             Padding(
               key: ValueKey(node.children[i].span.start),
-              padding: EdgeInsets.only(
-                top: i == 0 || node.tight ? 0 : theme.blockSpacing,
-              ),
+              padding: EdgeInsets.only(top: i == 0 ? 0 : 4),
               child: DocumentSelectionGroup(
                 node: node.children[i],
                 prefix:
@@ -355,14 +427,34 @@ class MarkstreamRenderer {
                       padding: theme.listMarkerPadding,
                       child: SelectionContainer.disabled(
                         child: node.children[i].checked == null
-                            ? Text(
-                                node.ordered ? '${node.start + i}.' : '•',
-                                style: body,
+                            ? SizedBox(
+                                width: node.ordered
+                                    ? MediaQuery.textScalerOf(
+                                        context,
+                                      ).scale(markerWidth)
+                                    : markerWidth,
+                                child: Text(
+                                  node.ordered
+                                      ? '${node.start + i}.'
+                                      : const ['•', '◦', '▪'][listDepth % 3],
+                                  textAlign: node.ordered
+                                      ? TextAlign.end
+                                      : TextAlign.center,
+                                  style: body.copyWith(
+                                    color: theme.proseInk.withValues(
+                                      alpha: theme.colors.ink3.a,
+                                    ),
+                                    fontFeatures: const [
+                                      FontFeature.tabularFigures(),
+                                    ],
+                                  ),
+                                ),
                               )
                             : _TaskIndicator(
                                 checked: node.children[i].checked!,
                                 radio: node.children[i].radio,
                                 theme: theme.task,
+                                opticalCenter: theme.inlineCode.opticalCenter,
                               ),
                       ),
                     ),
@@ -372,6 +464,8 @@ class MarkstreamRenderer {
                         node.children[i].children,
                         streaming: streaming && i == node.children.length - 1,
                         spacing: node.tight ? 0 : theme.blockSpacing,
+                        listDepth: listDepth + 1,
+                        style: body,
                         firstStyle: node.children[i].checked == true
                             ? theme.task.checkedText
                             : null,
@@ -383,6 +477,7 @@ class MarkstreamRenderer {
             ),
         ],
       );
+    }
     if (node is TaskItemNode)
       return Row(
         crossAxisAlignment: CrossAxisAlignment.baseline,
@@ -395,6 +490,7 @@ class MarkstreamRenderer {
                 checked: node.checked,
                 radio: node.radio,
                 theme: theme.task,
+                opticalCenter: theme.inlineCode.opticalCenter,
               ),
             ),
           ),
@@ -487,17 +583,33 @@ class _TaskIndicator extends StatelessWidget {
     required this.checked,
     required this.radio,
     required this.theme,
+    required this.opticalCenter,
   });
   final bool checked;
   final bool radio;
   final TaskTheme theme;
+  final double opticalCenter;
   @override
   Widget build(BuildContext context) => Semantics(
     checked: checked,
     inMutuallyExclusiveGroup: radio,
-    child: SizedBox.square(
-      dimension: theme.size,
-      child: CustomPaint(painter: _TaskPaint(checked, radio, theme)),
+    child: OpticalBaseline(
+      center: MediaQuery.textScalerOf(context).scale(opticalCenter),
+      child: SizedBox(
+        width: 22,
+        child: Center(
+          heightFactor: 1,
+          child: SizedBox.square(
+            key: ValueKey(
+              radio
+                  ? 'markstream-radio-indicator'
+                  : 'markstream-task-indicator',
+            ),
+            dimension: theme.size,
+            child: CustomPaint(painter: _TaskPaint(checked, radio, theme)),
+          ),
+        ),
+      ),
     ),
   );
 }
@@ -509,7 +621,7 @@ class _TaskPaint extends CustomPainter {
   final TaskTheme theme;
   @override
   void paint(Canvas canvas, Size size) {
-    final rect = (Offset.zero & size).deflate(.5);
+    final rect = (Offset.zero & size).deflate(theme.strokeWidth / 2);
     final outline = RRect.fromRectAndRadius(
       rect,
       Radius.circular(radio ? size.width / 2 : theme.radius),
@@ -519,15 +631,15 @@ class _TaskPaint extends CustomPainter {
     canvas.drawRRect(
       outline,
       Paint()
-        ..color = theme.borderColor
+        ..color = checked ? theme.selectedColor : theme.borderColor
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1,
+        ..strokeWidth = theme.strokeWidth,
     );
     if (!checked) return;
     if (radio) {
       canvas.drawCircle(
         size.center(Offset.zero),
-        theme.checkSize / 3,
+        3,
         Paint()..color = theme.checkColor,
       );
     } else {
@@ -540,7 +652,7 @@ class _TaskPaint extends CustomPainter {
         path,
         Paint()
           ..color = theme.checkColor
-          ..strokeWidth = 1.6
+          ..strokeWidth = 2
           ..style = PaintingStyle.stroke
           ..strokeCap = StrokeCap.round
           ..strokeJoin = StrokeJoin.round,

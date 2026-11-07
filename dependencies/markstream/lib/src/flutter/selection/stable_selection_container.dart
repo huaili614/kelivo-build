@@ -1,8 +1,12 @@
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 
+import 'selection_edge_initialization.dart';
+import 'selection_rect_collection.dart';
+
 /// Publishes incoming selectables before replaying selection edge events.
-class StableSelectionDelegate extends StaticSelectionContainerDelegate {
+class StableSelectionDelegate extends StaticSelectionContainerDelegate
+    with SelectionEdgeInitialization, SelectionRectCollection {
   StableSelectionDelegate() {
     addListener(WidgetsBinding.instance.ensureVisualUpdate);
   }
@@ -11,6 +15,14 @@ class StableSelectionDelegate extends StaticSelectionContainerDelegate {
   final _orderingGeometry = Map<Selectable, _OrderingGeometry>.identity();
   Map<Selectable, Matrix4>? _selectionTransforms;
   bool _dispatching = false;
+
+  @override
+  void prepareInitialSelectionEdge(SelectionEdgeUpdateEvent event) {
+    updateLastSelectionEdgeLocation(
+      globalSelectionEdgeLocation: event.globalPosition,
+      forEnd: event.type == SelectionEventType.endEdgeUpdate,
+    );
+  }
 
   @override
   Comparator<Selectable> get compareOrder => _compareOrder;

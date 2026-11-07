@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../../../core/models/assistant.dart';
 import '../../../core/models/health_data_type.dart';
+import '../../../core/services/browser/browser_tools_service.dart';
 import 'calculator_service.dart';
 
 typedef TextToSpeechStarter = Future<void> Function(String text);
@@ -23,6 +24,7 @@ class LocalToolNames {
   static const String calendarCreate = 'calendar_create';
   static const String currentLocation = 'get_current_location';
   static const String phoneControl = 'phone_control';
+  static const String browser = BrowserToolsService.toolName;
   static const String weather = 'get_weather';
   static const String healthSummary = 'get_health_summary';
   static const String remindersQuery = 'reminders_query';
@@ -40,6 +42,7 @@ class LocalToolNames {
     calendarCreate,
     currentLocation,
     phoneControl,
+    browser,
     weather,
     healthSummary,
     remindersQuery,
@@ -405,6 +408,14 @@ class LocalToolsService {
   /// assistant "Local tools" tab.
   static bool isAvailableOnThisPlatform(String name) {
     switch (name) {
+      case LocalToolNames.browser:
+        return !kIsWeb &&
+            const {
+              TargetPlatform.android,
+              TargetPlatform.iOS,
+              TargetPlatform.macOS,
+              TargetPlatform.windows,
+            }.contains(defaultTargetPlatform);
       case LocalToolNames.phoneControl:
         return DeviceLocalTools.phoneControlSupported;
       case LocalToolNames.screenTime:
@@ -435,6 +446,8 @@ class LocalToolsService {
 
   static Map<String, dynamic> definitionFor(String name) {
     switch (name) {
+      case LocalToolNames.browser:
+        return BrowserToolsService.getToolDefinition();
       case LocalToolNames.phoneControl:
         return _phoneControlDefinition;
       case LocalToolNames.timeInfo:
@@ -725,7 +738,9 @@ class LocalToolsService {
     'function': {
       'name': LocalToolNames.askUser,
       'description':
-          'Ask the user one or more short choice questions when you need clarification, additional information, or a decision before continuing. Supports single-choice and multi-choice questions. The UI will provide Other and Skip options automatically, so do not include those options yourself.',
+          'Ask the user one or more short questions when you need clarification, additional information, or a decision before continuing. Supports single-choice, multi-choice, and free-form input. '
+          'The options field is optional: omit it for free-form input such as a path, date, name, or short description. The UI then shows a text input field, and the entered text is returned in the answer value. Provide options when the user is choosing between clear alternatives. '
+          'The UI will provide Other and Skip options automatically, so do not include those options yourself.',
       'parameters': {
         'type': 'object',
         'properties': {
@@ -746,12 +761,13 @@ class LocalToolsService {
                 'type': {
                   'type': 'string',
                   'enum': ['single', 'multi'],
-                  'description': 'Answer type: single choice or multi choice.',
+                  'description':
+                      'Answer type: single choice or multi choice. Defaults to single. For free-form input, omit this field or use single.',
                 },
                 'options': {
                   'type': 'array',
                   'description':
-                      'Suggested options for the user to choose from.',
+                      'Optional suggested choices. Omit this field when the user should enter free-form text.',
                   'items': {'type': 'string'},
                 },
               },

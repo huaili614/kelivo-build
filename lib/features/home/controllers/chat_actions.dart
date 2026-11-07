@@ -1,3 +1,4 @@
+import '../../../core/models/context_compression_task.dart';
 import '../../../core/services/auth/provider_oauth_service.dart';
 import 'dart:async';
 import 'dart:collection';
@@ -38,6 +39,7 @@ import 'chat_controller.dart';
 import 'generation_controller.dart';
 import 'home_view_model.dart';
 import 'latest_wins_checkpoint_writer.dart';
+import '../../../core/models/tool_event_snapshot.dart';
 import 'stream_controller.dart' as stream_ctrl;
 
 final class _BarrierStreamSubscription<T> implements StreamSubscription<T> {
@@ -476,10 +478,12 @@ class ChatActions {
   }
 
   List<Map<String, dynamic>> _copyToolEvents(String messageId) {
-    return (_streamingToolEvents[messageId] ?? const <Map<String, dynamic>>[])
-        .map((event) => Map<String, dynamic>.from(event))
-        .toList(growable: false);
+    return _toolEventSnapshots[messageId] ??= ToolEventSnapshot(
+      _streamingToolEvents[messageId] ?? const <Map<String, dynamic>>[],
+    );
   }
+
+  final _toolEventSnapshots = <String, List<Map<String, dynamic>>>{};
 
   ChatMessage _messageWithCurrentReasoning(ChatMessage message) {
     final messageId = message.id;
@@ -606,6 +610,7 @@ class ChatActions {
   void _clearGenerationRuntimeState(ChatMessage message) {
     _generationCheckpointCursors.remove(message.id);
     _streamingToolEvents.remove(message.id);
+    _toolEventSnapshots.remove(message.id);
     _streamingStates.remove(message.id);
     _activeAssistantMessages.removeIfMatches(message);
   }
@@ -666,6 +671,7 @@ class ChatActions {
     String? content,
     Map<String, dynamic>? metadata,
   }) {
+    _toolEventSnapshots.remove(messageId);
     final events = _streamingToolEvents.putIfAbsent(
       messageId,
       () => <Map<String, dynamic>>[],
@@ -756,36 +762,6 @@ class ChatActions {
       modelId: modelId,
       assistant: assistant,
     );
-  }
-
-  Conversation _conversationForMessageContext(
-    Conversation conversation,
-    List<ChatMessage> messages, {
-    int? maxRawTruncateIndex,
-  }) {
-    final completeConversation = chatController
-        .conversationForCompleteHistoryContext(conversation);
-    return conversationForMessageContext(
-      conversation: completeConversation,
-      messages: messages,
-      maxRawTruncateIndex: maxRawTruncateIndex,
-    );
-  }
-
-  @visibleForTesting
-  static Conversation conversationForMessageContext({
-    required Conversation conversation,
-    required List<ChatMessage> messages,
-    int? maxRawTruncateIndex,
-  }) {
-    final rawTruncateIndex = conversation.truncateIndex;
-    if (maxRawTruncateIndex != null && rawTruncateIndex > maxRawTruncateIndex) {
-      return conversation.copyWith(truncateIndex: -1);
-    }
-    if (rawTruncateIndex < 0 || rawTruncateIndex <= messages.length) {
-      return conversation;
-    }
-    return conversation.copyWith(truncateIndex: -1);
   }
 
   @visibleForTesting
@@ -1065,16 +1041,9 @@ class ChatActions {
         TextPart(visibleText ?? _transformAssistantContent(state)),
       ];
     }
-    final transformed = [
-      for (final part in parts)
-        if (part is TextPart)
-          TextPart(_transformAssistantContent(state, part.text))
-        else if (part is! ImagePart || !isBlankImageUri(part.uri))
-          part,
-    ];
-    if (visibleText == null) return transformed;
-    return assistantPartsForVisibleText(
-      parts: transformed,
+    return state.partSnapshots.update(
+      parts,
+      transform: (text) => _transformAssistantContent(state, text),
       visibleText: visibleText,
     );
   }
@@ -1139,7 +1108,8 @@ class ChatActions {
     bool scheduledPreview = true,
   }) async {
     final claimToken = ++_sendInFlightClaimSerial;
-    if (isSendInFlight(conversation.id)) {
+    if (isSendInFlight(conversation.id) ||
+        chatService.contextCompression.blocksSending(conversation.id)) {
       return ChatActionResult.inFlight();
     }
     _sendInFlightClaims[conversation.id] = claimToken;
@@ -1157,6 +1127,11 @@ class ChatActions {
     } finally {
       if (_sendInFlightClaims[conversation.id] == claimToken) {
         _sendInFlightClaims.remove(conversation.id);
+        chatService.contextCompression.resumeIfReady(conversation.id);
+        onLoadingChanged?.call(
+          conversation.id,
+          chatController.isConversationLoading(conversation.id),
+        );
       }
     }
   }
@@ -1171,10 +1146,7 @@ class ChatActions {
     bool scheduledNotify = true,
     bool scheduledPreview = true,
   }) async {
-    final content = input.text.trim();
-    if (content.isEmpty &&
-        input.imagePaths.isEmpty &&
-        input.documents.isEmpty) {
+    if (input.isEmpty) {
       return ChatActionResult.error('empty_input');
     }
 
@@ -1517,14 +1489,17 @@ class ChatActions {
     bool scheduled = false,
     bool scheduledNotify = true,
     bool scheduledPreview = true,
+    String? expectedContextState,
   }) async {
     final claimToken = ++_sendInFlightClaimSerial;
-    if (isSendInFlight(conversation.id)) {
+    if (isSendInFlight(conversation.id) ||
+        chatService.contextCompression.blocksSending(conversation.id)) {
       return ChatActionResult.inFlight();
     }
     _sendInFlightClaims[conversation.id] = claimToken;
     try {
       return await _regenerateAtMessageClaimed(
+        expectedContextState: expectedContextState,
         message: message,
         conversation: conversation,
         assistantAsNewReply: assistantAsNewReply,
@@ -1540,6 +1515,11 @@ class ChatActions {
     } finally {
       if (_sendInFlightClaims[conversation.id] == claimToken) {
         _sendInFlightClaims.remove(conversation.id);
+        chatService.contextCompression.resumeIfReady(conversation.id);
+        onLoadingChanged?.call(
+          conversation.id,
+          chatController.isConversationLoading(conversation.id),
+        );
       }
     }
   }
@@ -1556,6 +1536,7 @@ class ChatActions {
     bool scheduled = false,
     bool scheduledNotify = true,
     bool scheduledPreview = true,
+    String? expectedContextState,
   }) async {
     // Avoid using BuildContext across async gaps (this class holds a BuildContext).
     final settings = contextProvider.read<SettingsProvider>();
@@ -1587,11 +1568,12 @@ class ChatActions {
     final isTemporaryConversation = chatService.isTemporaryConversation(
       conversation.id,
     );
+    final contextLimit = await _contextReadLimit(assistant, conversation);
     final completeMessages = isTemporaryConversation
         ? await chatController.messagesForCompleteHistoryContext(conversation)
         : await chatController.messagesForGenerationContext(
             conversation,
-            maxMessages: await _contextReadLimit(assistant, conversation),
+            maxMessages: contextLimit,
             throughRevisionId: message.id,
             includeFollowingAssistant: true,
           );
@@ -1652,6 +1634,7 @@ class ChatActions {
       assistantAsNewReply: assistantAsNewReply,
     )) {
       begin = await messageGenerationService.beginAssistantGeneration(
+        expectedContextState: expectedContextState,
         conversationId: conversation.id,
         modelId: modelId,
         providerKey: providerKey,
@@ -1670,6 +1653,7 @@ class ChatActions {
                 ) +
                 1;
       begin = await messageGenerationService.beginRegeneration(
+        expectedContextState: expectedContextState,
         conversationId: conversation.id,
         modelId: modelId,
         providerKey: providerKey,
@@ -1694,12 +1678,19 @@ class ChatActions {
       regenerationVersionSelections[groupId] = assistantMessage.version;
     }
 
-    final regenerationMessages = ChatActions.buildRegenerationMessages(
-      messages: completeMessages,
-      lastKeep: versioning.lastKeep,
-      targetGroupId: versioning.targetGroupId,
-      assistantPlaceholder: assistantMessage,
-    );
+    final regenerationMessages = isTemporaryConversation
+        ? await chatController.messagesForGenerationContext(
+            conversation,
+            // The new empty reply occupies one slot in this post-begin read.
+            maxMessages: contextLimit + 1,
+            throughRevisionId: assistantMessage.id,
+          )
+        : ChatActions.buildRegenerationMessages(
+            messages: completeMessages,
+            lastKeep: versioning.lastKeep,
+            targetGroupId: versioning.targetGroupId,
+            assistantPlaceholder: assistantMessage,
+          );
 
     // Keep the loaded window around the persisted generation message instead
     // of replacing a distant reading position with the conversation tail
@@ -1743,13 +1734,7 @@ class ChatActions {
             .prepareApiMessagesWithInjections(
               messages: regenerationMessages,
               versionSelections: regenerationVersionSelections,
-              currentConversation: isTemporaryConversation
-                  ? _conversationForMessageContext(
-                      conversation,
-                      regenerationMessages,
-                      maxRawTruncateIndex: versioning.lastKeep,
-                    )
-                  : conversation.copyWith(truncateIndex: -1),
+              currentConversation: conversation.copyWith(truncateIndex: -1),
               settings: settings,
               assistant: assistant,
               assistantId: assistantId,
@@ -1832,7 +1817,11 @@ class ChatActions {
     required Conversation conversation,
     bool allowImagesApiRouting = true,
   }) async {
-    if (isSendInFlight(conversation.id)) {
+    final compression = chatService.contextCompression.taskFor(conversation.id);
+    if (isSendInFlight(conversation.id) ||
+        (compression != null &&
+            compression.active &&
+            compression.phase != CompressionPhase.waiting)) {
       return ChatActionResult.inFlight();
     }
 
@@ -1900,10 +1889,29 @@ class ChatActions {
         ),
       );
     }
-    final streamingMessage = completeMessages[contextIndex].copyWith(
+    final answeredMessage = completeMessages[contextIndex].copyWith(
       parts: resumedParts.parts,
-      isStreaming: true,
     );
+    if (answeredMessage.providerId != providerKey ||
+        answeredMessage.modelId != modelId) {
+      // Native signatures belong to the source of each reply. Keep the answered
+      // tool round on its original message and give the new source its own reply.
+      // Persist cached answers too, since temporary chats keep them separately.
+      await chatService.updateMessage(
+        answeredMessage.id,
+        parts: answeredMessage.parts,
+      );
+      return regenerateAtMessage(
+        message: answeredMessage,
+        conversation: conversation,
+        assistantAsNewReply: true,
+        preserveFollowingMessages: true,
+        allowImagesApiRouting: allowImagesApiRouting,
+        assistantOverride: assistant,
+        modelOverride: (providerKey: providerKey, modelId: modelId),
+      );
+    }
+    final streamingMessage = answeredMessage.copyWith(isStreaming: true);
     _activeAssistantMessages.put(streamingMessage);
     chatController.publishGenerationStarted(streamingMessage);
     await chatService.updateMessage(streamingMessage.id, isStreaming: true);
@@ -2181,6 +2189,7 @@ class ChatActions {
         .getToolEventsForMessage(ctx.assistantMessage)
         .map((event) => Map<String, dynamic>.from(event))
         .toList();
+    _toolEventSnapshots.remove(state.messageId);
     _checkpointWriters[state.messageId] =
         LatestWinsCheckpointWriter<_StreamingCheckpoint>(
           write: (checkpoint) => chatService.updateStreamingCheckpointSilent(
@@ -2250,6 +2259,7 @@ class ChatActions {
 
       state.requestStartedAt = DateTime.now();
       final stream = ChatApiService.sendMessageStream(
+        imageContext: ctx.imageContext,
         config: ctx.config,
         modelId: ctx.modelId,
         messages: ctx.apiMessages,
@@ -2449,6 +2459,7 @@ class ChatActions {
       },
       setToolEventsInDb:
           (String messageId, List<Map<String, dynamic>> events) async {
+            _toolEventSnapshots.remove(messageId);
             _streamingToolEvents[messageId] = events
                 .map((event) => Map<String, dynamic>.from(event))
                 .toList();

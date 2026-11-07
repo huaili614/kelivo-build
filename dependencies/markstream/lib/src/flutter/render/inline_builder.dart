@@ -12,15 +12,14 @@ import '../selection/selectable_span_adapter.dart';
 import '../theme/markstream_theme.dart';
 import 'fitted_math.dart';
 import 'inline_code_capsule.dart';
+import 'optical_baseline.dart';
 import 'html_style.dart';
 import 'shifted_baseline.dart';
 import 'source_highlights.dart';
 import '../../core/serialize/to_html.dart' show isSafeHtmlUrl;
 
-typedef LinkRecognizerBuilder = TapGestureRecognizer Function(
-  LinkNode,
-  VoidCallback,
-);
+typedef LinkRecognizerBuilder =
+    TapGestureRecognizer Function(LinkNode, VoidCallback);
 
 class InlineSpanBuilder {
   const InlineSpanBuilder({
@@ -124,6 +123,55 @@ class InlineSpanBuilder {
       );
     }
 
+    WidgetSpan codeAtom(
+      String value, {
+      bool keyboard = false,
+      List<TextSegment>? segments,
+    }) {
+      final codeTheme = keyboard ? theme.keyboard : theme.inlineCode;
+      Widget capsule = InlineCodeCapsule(
+        text: value,
+        textSpan: segments == null
+            ? null
+            : extensions.literalSpanBuilder?.call(
+                context,
+                TextSpan(text: value, style: codeTheme.text),
+                segments,
+              ),
+        mouseCursor: onTap == null
+            ? SystemMouseCursors.text
+            : SystemMouseCursors.click,
+        style: codeTheme.text,
+        backgroundColor: codeTheme.backgroundColor,
+        borderColor: codeTheme.borderColor,
+        padding: codeTheme.padding,
+        radius: codeTheme.radius,
+        border: keyboard
+            ? Border(
+                top: BorderSide(color: codeTheme.borderColor),
+                left: BorderSide(color: codeTheme.borderColor),
+                right: BorderSide(color: codeTheme.borderColor),
+                bottom: BorderSide(color: codeTheme.borderColor, width: 1.5),
+              )
+            : null,
+      );
+      if (onTap != null)
+        capsule = MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(onTap: onTap, child: capsule),
+        );
+      return WidgetSpan(
+        alignment: PlaceholderAlignment.baseline,
+        baseline: TextBaseline.alphabetic,
+        child: unscaled(
+          highlights.atom(
+            node.span,
+            OpticalBaseline(center: codeTheme.opticalCenter, child: capsule),
+          ),
+        ),
+      );
+    }
+
     if (node is TextNode) {
       emit(node.text, node);
       final span = TextSpan(
@@ -164,30 +212,18 @@ class InlineSpanBuilder {
           ]),
         ),
       );
+    if (node is HighlightNode)
+      return children(node.children, highlightedTextStyle(style, theme));
     if (node is LinkNode)
       return children(node.children, style.merge(theme.link), target: node);
     if (node is CodeSpanNode) {
       for (final fragment in node.children) emit(fragment.text, fragment);
-      Widget capsule = InlineCodeCapsule(
-        text: node.code,
-        mouseCursor: onTap == null
-            ? SystemMouseCursors.text
-            : SystemMouseCursors.click,
-        style: theme.inlineCode.text,
-        backgroundColor: theme.inlineCode.backgroundColor,
-        borderColor: theme.inlineCode.borderColor,
-        padding: theme.inlineCode.padding,
-        radius: theme.inlineCode.radius,
-      );
-      if (onTap != null)
-        capsule = MouseRegion(
-          cursor: SystemMouseCursors.click,
-          child: GestureDetector(onTap: onTap, child: capsule),
-        );
-      return WidgetSpan(
-        alignment: PlaceholderAlignment.baseline,
-        baseline: TextBaseline.alphabetic,
-        child: unscaled(highlights.atom(node.span, capsule)),
+      return codeAtom(
+        node.code,
+        segments: [
+          for (final part in node.children)
+            TextSegment(text: part.text, sourceSpan: part.span, node: part),
+        ],
       );
     }
     if (node is MathInlineNode) {
@@ -277,22 +313,7 @@ class InlineSpanBuilder {
       }
       if (node.tag == 'code' || node.tag == 'kbd') {
         emit(toPlainText(node), node);
-        return atom(
-          DecoratedBox(
-            decoration: BoxDecoration(
-              color: theme.inlineCode.backgroundColor,
-              border: Border.all(color: theme.inlineCode.borderColor),
-              borderRadius: BorderRadius.circular(
-                node.tag == 'kbd' ? 3 : theme.inlineCode.radius,
-              ),
-            ),
-            child: Padding(
-              padding: theme.inlineCode.padding,
-              child: Text(toPlainText(node), style: theme.inlineCode.text),
-            ),
-          ),
-          toPlainText(node),
-        );
+        return codeAtom(toPlainText(node), keyboard: node.tag == 'kbd');
       }
       if (node.tag == 'sub' || node.tag == 'sup') {
         emit(toPlainText(node), node);
