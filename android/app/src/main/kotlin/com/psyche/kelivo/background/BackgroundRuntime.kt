@@ -25,6 +25,7 @@ import androidx.core.content.ContextCompat
 import com.psyche.kelivo.MainActivity
 import com.psyche.kelivo.KelivoApplication
 import com.psyche.kelivo.R
+import com.psyche.kelivo.widget.KelivoWidgetProvider
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
 import java.lang.ref.WeakReference
@@ -185,6 +186,9 @@ class BackgroundRuntime(private val context: Context) {
         }
         val terminal = (args["terminal"] as? Map<*, *>)?.let(BackgroundTask::fromMap)
         overlay.sync(tasks, terminal)
+        tasks.firstOrNull()?.let { task ->
+            KelivoWidgetProvider.refresh(context, task.title, task.detail)
+        }
         reconcileService()
     }
 

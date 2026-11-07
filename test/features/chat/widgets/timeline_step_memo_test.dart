@@ -1,4 +1,3 @@
-import '../../../support/markdown_render_helpers.dart';
 import "../../../support/business_test_harness.dart";
 
 import 'package:Kelivo/core/models/chat_message.dart';
@@ -607,16 +606,13 @@ void main() {
         ),
       );
       expect(press.onTap, isNotNull);
-      expect(renderedParagraphsWith('imported plan', exact: true), isEmpty);
+      expect(find.text('imported plan'), findsNothing);
       await tester.tap(find.text('Deep Thinking'));
       await tester.pumpAndSettle();
-      expect(
-        renderedParagraphsWith('imported plan', exact: true),
-        hasLength(1),
-      );
+      expect(find.text('imported plan'), findsOneWidget);
       await tester.tap(find.text('Deep Thinking'));
       await tester.pumpAndSettle();
-      expect(renderedParagraphsWith('imported plan', exact: true), isEmpty);
+      expect(find.text('imported plan'), findsNothing);
       final region = tester.widget<MouseRegion>(
         find.descendant(
           of: find.byType(IosCardPress).first,
@@ -700,7 +696,7 @@ void main() {
     await tester.pump();
     expect(find.textContaining('LIVE-A'), findsOneWidget);
     expect(find.textContaining('LIVE-B'), findsOneWidget);
-    expect(renderedParagraphsWith('middle', exact: false), hasLength(1));
+    expect(find.textContaining('middle'), findsOneWidget);
     final keys = _toolKeys(tester);
     expect(keys.toSet(), hasLength(2));
   });

@@ -58,6 +58,7 @@ class BackgroundOverlay(
     private val dismissed = mutableSetOf<String>()
     private val expire = Runnable { completed = null; refresh() }
     private var pendingLongPress: Runnable? = null
+    private var createdIsland = false
     val isVisible get() = view != null
 
     fun sync(tasks: List<BackgroundTask>, terminal: BackgroundTask?) {
@@ -90,12 +91,15 @@ class BackgroundOverlay(
 
     fun refresh() {
         main.removeCallbacks(expire)
-        if (runtime.foreground || runtime.phoneControlActive || !runtime.enabled("overlayEnabled") ||
+        val islandMode = runtime.foreground && runtime.enabled("islandEnabled")
+        if ((runtime.foreground && !islandMode) || runtime.phoneControlActive ||
+            !runtime.enabled("overlayEnabled") ||
             !Settings.canDrawOverlays(context) || runtime.isPromoted()) {
             hide()
             return
         }
-        val seconds = ((runtime.setting("completionSeconds") as? Number)?.toLong() ?: 60).coerceIn(0, 900)
+        val seconds = if (islandMode) 3L else
+            ((runtime.setting("completionSeconds") as? Number)?.toLong() ?: 60).coerceIn(0, 900)
         val finish = completed
         if (finish != null) {
             val remaining = finish.finishedAt + seconds * 1000 - System.currentTimeMillis()
@@ -105,15 +109,16 @@ class BackgroundOverlay(
         if (task == null) { hide(); return }
         current = task
         try {
-            val next = BackgroundOverlayAppearance(runtime.setting("overlayAppearance") as? Map<*, *> ?: emptyMap<String, Any>())
+            val next = if (islandMode) islandAppearance() else
+                BackgroundOverlayAppearance(runtime.setting("overlayAppearance") as? Map<*, *> ?: emptyMap<String, Any>())
             val availableWidth = context.resources.displayMetrics.widthPixels / context.resources.displayMetrics.density - 16f
             val nextGeometry = next.layout(availableWidth)
-            if (next != appearance || nextGeometry != geometry) {
+            if (next != appearance || nextGeometry != geometry || createdIsland != islandMode) {
                 hide()
                 appearance = next
                 geometry = nextGeometry
             }
-            if (view == null) create()
+            if (view == null) create(islandMode)
             val count = runtime.tasks.size
             title?.text = if (count > 1) "$count ${runtime.label("tasks", "Tasks")}" else task.title
             detail?.text = task.detail
@@ -139,9 +144,10 @@ class BackgroundOverlay(
     private fun dp(value: Int) = (value * context.resources.displayMetrics.density).toInt()
     private fun dp(value: Float) = (value * context.resources.displayMetrics.density).toInt()
 
-    private fun create() {
+    private fun create(islandMode: Boolean) {
+        createdIsland = islandMode
         val dark = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
-        val foreground = if (dark) Color.WHITE else Color.rgb(30, 32, 38)
+        val foreground = if (dark || islandMode) Color.WHITE else Color.rgb(30, 32, 38)
         val root = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = if (appearance.iconOnly) Gravity.CENTER else Gravity.CENTER_VERTICAL
@@ -149,12 +155,13 @@ class BackgroundOverlay(
             elevation = if (appearance.showBackground) dp(8).toFloat() else 0f
             if (appearance.showBackground || appearance.showBorder) background = GradientDrawable().apply {
                 setColor(if (!appearance.showBackground) Color.TRANSPARENT else
-                    if (dark) Color.rgb(31, 33, 39) else Color.rgb(249, 250, 253))
+                    if (islandMode) Color.rgb(16, 17, 20)
+                    else if (dark) Color.rgb(31, 33, 39) else Color.rgb(249, 250, 253))
                 cornerRadius = dp(appearance.cornerRadius).toFloat()
                 if (appearance.showBorder) setStroke(dp(1), if (dark) Color.rgb(93, 97, 107) else Color.rgb(200, 204, 213))
             }
             tag = "overlay"
-            setOnLongClickListener { dismissAll(); true }
+            if (!islandMode) setOnLongClickListener { dismissAll(); true }
         }
         icon = FrameLayout(context).apply { tag = "icon" }
         root.addView(icon, LinearLayout.LayoutParams(dp(geometry.badge), dp(geometry.badge)))
@@ -186,7 +193,7 @@ class BackgroundOverlay(
         if (!appearance.iconOnly) root.addView(textColumn, LinearLayout.LayoutParams(0, -1, 1f).apply {
             leftMargin = dp(geometry.gap)
         })
-        if (appearance.showClose) root.addView(TextView(context).apply {
+        if (appearance.showClose && !islandMode) root.addView(TextView(context).apply {
             tag = "close"
             text = "×"; textSize = 24f; setTextColor(foreground); gravity = Gravity.CENTER
             contentDescription = runtime.label("close", "Dismiss")
@@ -199,11 +206,26 @@ class BackgroundOverlay(
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT,
         ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = prefs.getInt("overlay_x", dp(8))
-            y = prefs.getInt("overlay_y", metrics.heightPixels * 2 / 3)
+            if (islandMode) {
+                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                x = 0
+                // Leave room for OEM status-bar islands (OriginOS 原子岛, MIUI
+                // 焦点通知) which are drawn in a layer above app overlays.
+                y = statusBarHeight() + dp(28)
+            } else {
+                gravity = Gravity.TOP or Gravity.START
+                x = prefs.getInt("overlay_x", dp(8))
+                y = prefs.getInt("overlay_y", metrics.heightPixels * 2 / 3)
+            }
         }
         params = layout
+        if (islandMode) {
+            root.setOnClickListener {
+                current?.let { task ->
+                    completed = null; hide(); runtime.openConversation(task.conversationId)
+                }
+            }
+        } else {
         var startX = 0; var startY = 0
         var touchX = 0f; var touchY = 0f; var dragging = false; var longPressed = false
         val longPress = Runnable { longPressed = true; root.performLongClick() }
@@ -238,9 +260,38 @@ class BackgroundOverlay(
                 else -> false
             }
         }
+        }
         windowManager.addView(root, layout)
         view = root
         iconKey = ""
+        if (islandMode) {
+            root.alpha = 0f
+            root.translationY = -dp(14).toFloat()
+            root.animate().alpha(1f).translationY(0f).setDuration(190).start()
+        }
+    }
+
+    /** The foreground capsule is a fixed compact pill, independent of the
+     * draggable background overlay the user styles in settings. */
+    private fun islandAppearance() = BackgroundOverlayAppearance(mapOf(
+        "width" to 186f,
+        "height" to 44f,
+        "cornerRadius" to 22f,
+        "iconSize" to 24f,
+        "progressSize" to 28f,
+        "progressStrokeWidth" to 2f,
+        "showProgress" to true,
+        "showTitle" to true,
+        "showSubtitle" to false,
+        "showTime" to false,
+        "showClose" to false,
+        "showBackground" to true,
+        "showBorder" to false,
+    ))
+
+    private fun statusBarHeight(): Int {
+        val id = context.resources.getIdentifier("status_bar_height", "dimen", "android")
+        return if (id > 0) context.resources.getDimensionPixelSize(id) else dp(28)
     }
 
     private fun updateIcon() {
@@ -287,6 +338,7 @@ class BackgroundOverlay(
     }
 
     private fun clampPosition() {
+        if (createdIsland) return
         val layout = params ?: return
         val root = view ?: return
         val metrics = context.resources.displayMetrics

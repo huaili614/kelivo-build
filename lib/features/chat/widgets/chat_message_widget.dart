@@ -31,8 +31,7 @@ import '../../../utils/avatar_cache.dart';
 import '../../../utils/assistant_regex.dart';
 import '../../../core/models/assistant.dart';
 import '../../../core/providers/tts_provider.dart';
-import '../../../shared/markdown/markdown_with_code_highlight.dart';
-import 'package:Kelivo/shared/widgets/app_selection_area.dart';
+import '../../../shared/widgets/markdown_with_highlight.dart';
 import '../../../shared/widgets/snackbar.dart';
 import '../../../shared/widgets/audio_clip_player.dart';
 import '../../../core/utils/multimodal_input_utils.dart';
@@ -56,7 +55,6 @@ import '../../home/services/tool_approval_service.dart';
 import '../utils/assistant_paragraph_splitter.dart';
 import '../utils/thinking_tag_parser.dart';
 import 'timeline_projection.dart';
-import 'select_copy_sheet.dart';
 import 'timeline_visibility.dart';
 import 'citation_sources_sheet.dart';
 import 'chat_surface.dart';
@@ -952,7 +950,7 @@ class _ToolDetailBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return AppSelectionArea(
+    return SelectionArea(
       child: CustomScrollView(
         controller: scrollController,
         slivers: [
@@ -1197,6 +1195,13 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
 
   void _applyAutoCollapseInlineThinkIfFinished({ChatMessageWidget? oldWidget}) {
     if (!mounted) return;
+    final newExtracted = _legacyInlineThinkingFor(
+      widget,
+    ).thinkingTexts.join('\n\n');
+    final usingInlineThinkNew =
+        (widget.reasoningText == null || widget.reasoningText!.isEmpty) &&
+        newExtracted.isNotEmpty;
+
     bool usingInlineThinkOld = false;
     if (oldWidget != null) {
       final oldExtracted = _legacyInlineThinkingFor(
@@ -1207,15 +1212,6 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
               oldWidget.reasoningText!.isEmpty) &&
           oldExtracted.isNotEmpty;
     }
-
-    // Read the old memo before parsing the new source so the build can reuse
-    // the new result instead of alternating the single-slot cache.
-    final newExtracted = _legacyInlineThinkingFor(
-      widget,
-    ).thinkingTexts.join('\n\n');
-    final usingInlineThinkNew =
-        (widget.reasoningText == null || widget.reasoningText!.isEmpty) &&
-        newExtracted.isNotEmpty;
 
     final autoCollapse = context.read<SettingsProvider>().autoCollapseThinking;
 
@@ -1450,7 +1446,7 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
     final safeBottom = insets.bottom + 12;
 
     const double menuWidth = 220; // compact width
-    final double estMenuHeight = widget.onEdit == null ? 140 : 184;
+    const double estMenuHeight = 140; // ~ 3 rows
     const double gap = 10; // space between bubble and menu
 
     // Horizontal placement: align menu's right edge to bubble's right edge,
@@ -1558,24 +1554,6 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
                                       );
                                     }
                                   }
-                                },
-                              ),
-                              _MenuItem(
-                                icon: Lucide.TextSelect,
-                                label: l10n.messageMoreSheetSelectCopy,
-                                onTap: () {
-                                  Navigator.of(ctx).pop();
-                                  WidgetsBinding.instance.addPostFrameCallback((
-                                    _,
-                                  ) {
-                                    if (!mounted) return;
-                                    unawaited(
-                                      showSelectCopySheet(
-                                        context,
-                                        message: widget.message,
-                                      ),
-                                    );
-                                  });
                                 },
                               ),
                               if (widget.onEdit != null)
@@ -2106,7 +2084,7 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
     }
 
     if (isDesktop) {
-      content = AppSelectionArea(
+      content = SelectionArea(
         key: ValueKey('user_${widget.message.id}'),
         child: content,
       );
@@ -2576,7 +2554,7 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
     );
 
     return RepaintBoundary(
-      child: AppSelectionArea(
+      child: SelectionArea(
         key: ValueKey(
           contentKey.isEmpty
               ? 'assistant_${widget.message.id}'
@@ -3252,7 +3230,7 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
                             Padding(
                               padding: const EdgeInsets.fromLTRB(8, 2, 8, 6),
                               child: RepaintBoundary(
-                                child: AppSelectionArea(
+                                child: SelectionArea(
                                   key: ValueKey(
                                     'translation_${widget.message.id}',
                                   ),
@@ -5209,12 +5187,12 @@ class _ChainOfThoughtReasoningStepState
             // Bouncing physics already declines drags when content fits.
             // Keeping it stable also retains ScrollPosition on overflow.
             physics: const BouncingScrollPhysics(),
-            child: AppSelectionArea(child: reasoningContent(display)),
+            child: SelectionArea(child: reasoningContent(display)),
           ),
         ),
       );
     } else if (state == _ReasoningStepState.expanded) {
-      content = AppSelectionArea(child: reasoningContent(display));
+      content = SelectionArea(child: reasoningContent(display));
     }
 
     return _TimelineStepShell(
@@ -7253,7 +7231,7 @@ class _ReasoningSectionState extends State<_ReasoningSection> {
     }
 
     // Enable long-press text selection in reasoning body
-    body = AppSelectionArea(child: body);
+    body = SelectionArea(child: body);
 
     return AnimatedSize(
       duration: const Duration(milliseconds: 300),

@@ -5751,51 +5751,5 @@
   "mcpOAuthDiscovering": "Discovering authorization server…",
   "mcpOAuthRegistering": "Preparing authorization…",
   "mcpOAuthWaitingBrowser": "Waiting for browser authorization…",
-  "mcpOAuthExchangingToken": "Completing sign-in…",
-  "markdownPlaygroundTitle": "Markdown Playground",
-  "markdownPlaygroundSource": "Markdown source",
-  "markdownPlaygroundPreview": "Preview",
-  "markdownPlaygroundAst": "AST",
-  "markdownPlaygroundPlay": "Stream characters",
-  "markdownPlaygroundPause": "Pause",
-  "markdownPlaygroundResume": "Resume",
-  "markdownPlaygroundShowAll": "Show complete",
-  "markdownPlaygroundWidth": "Preview width",
-  "markdownPlaygroundTheme": "Preview theme",
-  "markdownPlaygroundPlain": "Selected plain text",
-  "markdownPlaygroundMarkdown": "Selected Markdown",
-  "markdownPlaygroundSelectionHint": "Select text in the preview to inspect copied content.",
-  "markdownPlaygroundEmpty": "Enter Markdown to preview it.",
-  "markdownPlaygroundProgress": "Input {shown} / {total}",
-  "@markdownPlaygroundProgress": {
-    "placeholders": {
-      "shown": {
-        "type": "int"
-      },
-      "total": {
-        "type": "int"
-      }
-    }
-  },
-  "markdownCopyMarkdownAction": "Copy Markdown",
-  "markdownCopyCsvAction": "Copy CSV",
-  "markdownCopyImageAction": "Copy image",
-  "markdownCodeLabel": "Code",
-  "markdownDetailsLabel": "Details",
-  "markdownMoreRows": "Show {count} more rows",
-  "@markdownMoreRows": {
-    "placeholders": {
-      "count": {
-        "type": "int"
-      }
-    }
-  },
-  "markdownNoteLabel": "Note",
-  "markdownTipLabel": "Tip",
-  "markdownImportantLabel": "Important",
-  "markdownWarningLabel": "Warning",
-  "markdownCautionLabel": "Caution",
-  "markdownDangerLabel": "Danger",
-  "markdownCopyRichTextAction": "Copy rich text",
-  "markdownCopySelectionFailed": "Could not copy the selected text."
+  "mcpOAuthExchangingToken": "Completing sign-in…"
 }

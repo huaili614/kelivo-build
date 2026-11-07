@@ -1022,6 +1022,12 @@ class _SideDrawerState extends State<SideDrawer> with TickerProviderStateMixin {
   }
 
   @override
+  void deactivate() {
+    _closeAssistantPicker();
+    super.deactivate();
+  }
+
+  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final host = InteractiveDrawer.maybeControllerOf(context);

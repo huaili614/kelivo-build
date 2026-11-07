@@ -18,19 +18,13 @@ class InteractiveDrawerController extends ChangeNotifier {
   bool get isClosed => value <= 1e-6;
 
   void _attach(AnimationController c) {
-    final previous = _controller;
-    if (previous != null) _detach(previous);
     _controller = c;
     if (c.value != _valueOffline) c.value = _valueOffline;
     c.addListener(notifyListeners);
   }
 
-  void _detach(AnimationController owner) {
-    // A replacement can mount before the old drawer is disposed. Only the
-    // currently attached owner may clear the connection or its saved progress.
-    owner.removeListener(notifyListeners);
-    if (!identical(_controller, owner)) return;
-    _valueOffline = owner.value;
+  void _detach() {
+    _controller?.removeListener(notifyListeners);
     _controller = null;
   }
 
@@ -218,8 +212,7 @@ class _InteractiveDrawerState extends State<InteractiveDrawer>
   void didUpdateWidget(covariant InteractiveDrawer oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
-      _controllerProxy._detach(_anim);
-      if (oldWidget.controller == null) _controllerProxy.dispose();
+      oldWidget.controller?._detach();
       _controllerProxy = widget.controller ?? InteractiveDrawerController();
       _controllerProxy._attach(_anim);
     }
@@ -230,8 +223,7 @@ class _InteractiveDrawerState extends State<InteractiveDrawer>
 
   @override
   void dispose() {
-    _controllerProxy._detach(_anim);
-    if (widget.controller == null) _controllerProxy.dispose();
+    widget.controller?._detach();
     _anim.dispose();
     super.dispose();
   }
@@ -302,15 +294,7 @@ class _InteractiveDrawerState extends State<InteractiveDrawer>
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // Move the transcript as one retained paint/semantics subtree.
-            // Its descendants keep local coordinates during drawer gestures.
-            RepaintBoundary(
-              child: Semantics(
-                container: true,
-                explicitChildNodes: true,
-                child: widget.child,
-              ),
-            ),
+            widget.child,
             if (_anim.value > 0.0)
               IgnorePointer(
                 ignoring: !widget.barrierDismissible,
@@ -339,7 +323,7 @@ class _InteractiveDrawerState extends State<InteractiveDrawer>
         child: Semantics(
           label: widget.semanticLabel,
           container: true,
-          child: RepaintBoundary(child: widget.drawer),
+          child: widget.drawer,
         ),
       );
       return Align(
@@ -372,7 +356,7 @@ class _InteractiveDrawerState extends State<InteractiveDrawer>
       child: Semantics(
         label: widget.semanticLabel,
         container: true,
-        child: RepaintBoundary(child: widget.drawer),
+        child: widget.drawer,
       ),
     );
 

@@ -38,7 +38,7 @@
          startup gate rejects. Kelivo ships its own backup (WebDAV/S3/local
          export), so system backup is disabled. -->
     <application
-        android:label="Kelivo"
+        android:label="Kelivo 岛"
         android:name=".KelivoApplication"
         android:appCategory="productivity"
         android:allowBackup="false"
@@ -144,6 +144,17 @@
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" />
                 <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
             </intent-filter>
+        </receiver>
+        <!-- Home-screen widget: current generation / last known state -->
+        <receiver
+            android:name=".widget.KelivoWidgetProvider"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/kelivo_widget_info" />
         </receiver>
         <!-- Foreground service to keep Flutter isolate alive for background generation -->
         <service

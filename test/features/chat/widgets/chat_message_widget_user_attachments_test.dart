@@ -16,7 +16,6 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../support/fake_audioplayers_platform.dart';
-import '../../../support/markdown_render_helpers.dart';
 
 Widget _harness(Widget child) {
   return MultiProvider(
@@ -166,10 +165,8 @@ void main() {
     expect(bubbleFinder, findsOneWidget);
     expect(attachmentsFinder, findsOneWidget);
     expect(
-      renderParagraphs(
-        bubbleFinder,
-      ).map((paragraph) => paragraph.text.toPlainText()),
-      contains('请看这个'),
+      find.descendant(of: bubbleFinder, matching: find.text('请看这个')),
+      findsOneWidget,
     );
     expect(
       find.descendant(of: bubbleFinder, matching: find.text('spec.pdf')),
@@ -225,11 +222,12 @@ void main() {
       findsOneWidget,
     );
     expect(
-      markdownParagraph(
-        tester,
-        '[image:missing-user-image.png]',
-      ).text.toPlainText(),
-      literal,
+      find.textContaining('[image:missing-user-image.png]'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('[file:/tmp/spec.pdf|spec.pdf|application/pdf]'),
+      findsOneWidget,
     );
   });
 

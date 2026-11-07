@@ -39,9 +39,7 @@ Future<void> _writeSizedFile(Directory root, String name, int size) async {
 }
 
 Future<void> _pumpUntilFound(WidgetTester tester, Finder finder) async {
-  // The disk report runs in real time; give loaded parallel test hosts up to
-  // five seconds while returning as soon as the requested UI is available.
-  for (var attempt = 0; attempt < 500 && finder.evaluate().isEmpty; attempt++) {
+  for (var attempt = 0; attempt < 40 && finder.evaluate().isEmpty; attempt++) {
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 10)),
     );

@@ -6,6 +6,7 @@ class MobileBackgroundSettings {
     this.notificationsEnabled = false,
     this.privacyMode = false,
     this.overlayEnabled = false,
+    this.islandEnabled = true,
     this.liveUpdatesEnabled = false,
     this.liveActivitiesEnabled = false,
     this.locationEnabled = false,
@@ -22,6 +23,10 @@ class MobileBackgroundSettings {
   final bool notificationsEnabled;
   final bool privacyMode;
   final bool overlayEnabled;
+
+  /// Shows the overlay capsule while the app is in the foreground, pinned to
+  /// the top centre instead of the draggable background position.
+  final bool islandEnabled;
   final bool liveUpdatesEnabled;
   final bool liveActivitiesEnabled;
   final bool locationEnabled;
@@ -44,6 +49,7 @@ class MobileBackgroundSettings {
       notificationsEnabled: json['notificationsEnabled'] == true,
       privacyMode: json['privacyMode'] == true,
       overlayEnabled: json['overlayEnabled'] == true,
+      islandEnabled: json['islandEnabled'] != false,
       liveUpdatesEnabled: json['liveUpdatesEnabled'] == true,
       liveActivitiesEnabled: json['liveActivitiesEnabled'] == true,
       locationEnabled: json['locationEnabled'] == true,
@@ -65,6 +71,7 @@ class MobileBackgroundSettings {
     'notificationsEnabled': notificationsEnabled,
     'privacyMode': privacyMode,
     'overlayEnabled': overlayEnabled,
+    'islandEnabled': islandEnabled,
     'liveUpdatesEnabled': liveUpdatesEnabled,
     'liveActivitiesEnabled': liveActivitiesEnabled,
     'locationEnabled': locationEnabled,
@@ -82,6 +89,7 @@ class MobileBackgroundSettings {
     bool? notificationsEnabled,
     bool? privacyMode,
     bool? overlayEnabled,
+    bool? islandEnabled,
     bool? liveUpdatesEnabled,
     bool? liveActivitiesEnabled,
     bool? locationEnabled,
@@ -97,6 +105,7 @@ class MobileBackgroundSettings {
     notificationsEnabled: notificationsEnabled ?? this.notificationsEnabled,
     privacyMode: privacyMode ?? this.privacyMode,
     overlayEnabled: overlayEnabled ?? this.overlayEnabled,
+    islandEnabled: islandEnabled ?? this.islandEnabled,
     liveUpdatesEnabled: liveUpdatesEnabled ?? this.liveUpdatesEnabled,
     liveActivitiesEnabled: liveActivitiesEnabled ?? this.liveActivitiesEnabled,
     locationEnabled: locationEnabled ?? this.locationEnabled,

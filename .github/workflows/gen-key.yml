@@ -1,0 +1,20 @@
+name: Generate Signing Key
+on: workflow_dispatch
+jobs:
+  key:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '17'
+      - name: generate
+        run: |
+          keytool -genkeypair -v -keystore key.jks -storetype JKS \
+            -storepass kelivo2026 -keypass kelivo2026 -alias kelivo \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Kelivo Self Build, O=Kelivo, C=CN"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: keystore
+          path: key.jks

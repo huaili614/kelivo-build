@@ -72,6 +72,3 @@ internationalization.md
 # Local iOS profiling tools and device measurements
 /docs/performance/ios-device-*/
 /tool/ios_performance/
-
-# Local Markdown visual baselines and comparison reports
-/test_goldens/out/

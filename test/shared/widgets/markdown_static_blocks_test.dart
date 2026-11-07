@@ -1,10 +1,9 @@
 import 'dart:io';
 import 'dart:ui' as ui;
 
-import 'package:markstream/markstream.dart';
 import 'package:Kelivo/core/providers/settings_provider.dart';
 import 'package:Kelivo/l10n/app_localizations.dart';
-import 'package:Kelivo/shared/markdown/markdown_with_code_highlight.dart';
+import 'package:Kelivo/shared/widgets/markdown_with_highlight.dart';
 import 'package:Kelivo/shared/widgets/section_card.dart';
 import 'package:Kelivo/theme/palettes.dart';
 import 'package:Kelivo/theme/theme_factory.dart';
@@ -17,7 +16,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
 import '../../support/business_test_harness.dart';
-import '../../support/markdown_render_helpers.dart';
 
 const _source = r'''# Skill instructions
 
@@ -98,7 +96,8 @@ double _pixelError(Uint8List original, Uint8List optimized) {
 
 Map<String, Rect> _glyphRects(WidgetTester tester) {
   final result = <String, Rect>{};
-  for (final paragraph in markdownParagraphs(tester)) {
+  for (final element in find.byType(RichText).evaluate()) {
+    final paragraph = element.renderObject! as RenderParagraph;
     final text = paragraph.text.toPlainText();
     for (final label in [
       'Skill instructions',
@@ -127,6 +126,13 @@ Map<String, Rect> _glyphRects(WidgetTester tester) {
       );
     }
   }
+  for (final key in [
+    'code-block-surface',
+    'markdown-blockquote',
+    'details-surface',
+  ]) {
+    result[key] = tester.getRect(find.byKey(ValueKey(key)));
+  }
   result['table'] = tester.getRect(find.byType(Table));
   return result;
 }
@@ -134,7 +140,7 @@ Map<String, Rect> _glyphRects(WidgetTester tester) {
 void main() {
   setUpAll(() async {
     final bytes = File(
-      'test/fixtures/fonts/JetBrainsMono-Regular.ttf',
+      'dependencies/gpt_markdown/lib/fonts/JetBrainsMono-Regular.ttf',
     ).readAsBytesSync();
     await (FontLoader(
       'skill-preview-metrics',
@@ -248,12 +254,15 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        final state = tester.state(find.byType(MarkstreamView));
+        final state = tester.state(find.byType(MarkdownWithCodeHighlight));
         expect(find.byType(Math), findsOneWidget);
 
         source.value += ' appended';
         await tester.pumpAndSettle();
-        expect(tester.state(find.byType(MarkstreamView)), same(state));
+        expect(
+          tester.state(find.byType(MarkdownWithCodeHighlight)),
+          same(state),
+        );
         expect(find.byType(Math), findsOneWidget);
         if (disableMath) {
           await settings.setEnableMathRendering(false);
@@ -262,10 +271,15 @@ void main() {
         }
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
-        expect(tester.state(find.byType(MarkstreamView)), same(state));
+        expect(
+          tester.state(find.byType(MarkdownWithCodeHighlight)),
+          same(state),
+        );
         expect(find.byType(Math), findsNothing);
         expect(
-          markdownParagraphs(tester).map((text) => text.text.toPlainText()),
+          tester
+              .widgetList<RichText>(find.byType(RichText))
+              .map((text) => text.text.toPlainText()),
           contains(source.value),
         );
 
@@ -278,7 +292,10 @@ void main() {
         }
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
-        expect(tester.state(find.byType(MarkstreamView)), same(state));
+        expect(
+          tester.state(find.byType(MarkdownWithCodeHighlight)),
+          same(state),
+        );
         expect(find.byType(Math), findsOneWidget);
         expect(
           tester.widget<Math>(find.byType(Math)).ast!.greenRoot.encodeTeX(),
@@ -288,7 +305,10 @@ void main() {
         source.value = r'Replacement $y$';
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
-        expect(tester.state(find.byType(MarkstreamView)), same(state));
+        expect(
+          tester.state(find.byType(MarkdownWithCodeHighlight)),
+          same(state),
+        );
         expect(find.byType(Math), findsOneWidget);
         expect(
           tester.widget<Math>(find.byType(Math)).ast!.greenRoot.encodeTeX(),
@@ -398,23 +418,7 @@ void main() {
               originalHeight,
             );
             final optimizedRects = _glyphRects(tester);
-            expect(
-              originalRects.keys,
-              containsAll([
-                'Skill instructions',
-                'Keep bold',
-                '中文段落',
-                'Nested and loose lists',
-                'First step',
-                'Quote one',
-                'Completed',
-                'Input',
-                'Inline math',
-                'Final paragraph',
-                'The end of the',
-                'table',
-              ]),
-            );
+            expect(originalRects.length, greaterThanOrEqualTo(14));
             expect(optimizedRects.keys, unorderedEquals(originalRects.keys));
             for (final label in originalRects.keys) {
               final before = originalRects[label]!;

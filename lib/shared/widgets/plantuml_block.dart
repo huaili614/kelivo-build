@@ -16,12 +16,9 @@ import 'snackbar.dart';
 enum _PlantUMLTab { image, code }
 
 class PlantUMLBlock extends StatefulWidget {
-  const PlantUMLBlock({super.key, required this.code, this.codeBuilder});
+  const PlantUMLBlock({super.key, required this.code});
 
   final String code;
-
-  /// Markdown supplies its source-indexed code view and selection owner.
-  final WidgetBuilder? codeBuilder;
 
   @override
   State<PlantUMLBlock> createState() => _PlantUMLBlockState();
@@ -224,17 +221,15 @@ class _PlantUMLBlockState extends State<PlantUMLBlock> {
             controller: _codeScrollController,
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
-              child:
-                  widget.codeBuilder?.call(context) ??
-                  SelectableText(
-                    widget.code,
-                    style: TextStyle(
-                      color: colors.textPrimary,
-                      fontFamily: 'monospace',
-                      fontSize: 13,
-                      height: 1.5,
-                    ),
-                  ),
+              child: SelectableText(
+                widget.code,
+                style: TextStyle(
+                  color: colors.textPrimary,
+                  fontFamily: 'monospace',
+                  fontSize: 13,
+                  height: 1.5,
+                ),
+              ),
             ),
           ),
         ),

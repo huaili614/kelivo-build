@@ -45,7 +45,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(() async {
     final bytes = await File(
-      'test/fixtures/fonts/JetBrainsMono-Regular.ttf',
+      'dependencies/gpt_markdown/lib/fonts/JetBrainsMono-Regular.ttf',
     ).readAsBytes();
     await (FontLoader(
       'WorkspaceTest',

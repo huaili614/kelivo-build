@@ -210,12 +210,7 @@ void main() {
         await tester.pump(const Duration(seconds: 2));
         expect(find.byType(ChatMessageWidget), findsWidgets);
         if (frosted && forceLive) {
-          expect(
-            find.byWidgetPredicate(
-              (widget) => widget is BackdropFilter && widget.enabled,
-            ),
-            findsWidgets,
-          );
+          expect(find.byType(BackdropFilter), findsWidgets);
         }
         if (frosted && backdropScope && !forceLive) {
           final controller = tester

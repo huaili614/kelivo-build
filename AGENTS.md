@@ -14,19 +14,15 @@ Kelivo is a cross-platform LLM chat client built with Flutter, targeting iOS, An
 
 ## Pre-commit checklist
 
-Format changed Dart files with `dart format`, including files under `lib/`,
-`test/`, `integration_test/`, `dependencies/markstream/lib/`, and
-`dependencies/markstream/test/`. Then run both packages before every commit;
-all checks must pass:
+All three must pass before committing:
 
 ```bash
-dart analyze --fatal-infos lib test integration_test
-flutter test
-(cd dependencies/markstream && flutter pub get && dart analyze --fatal-infos && flutter test)
+dart format lib test                        # format changed files
+dart analyze --fatal-infos lib test         # zero warnings, zero infos
+flutter test                                # all unit tests green
 ```
 
-CI (`pr-check.yml`) enforces the same gates on every PR. Root-package checks
-do not cover the `markstream` path package.
+CI (`pr-check.yml`) enforces the same gates on every PR.
 
 ## Benchmarks are not tests
 
@@ -58,7 +54,7 @@ flutter test test/perf/timeline_scroll_bench.dart
 
 ## Local dependencies
 
-Several packages live under `dependencies/` and are referenced by path in `pubspec.yaml` (e.g. `markstream`, `mcp_client`, `flutter_tts`, `flutter_math_fork`, `downsize`). The analyzer excludes `dependencies/flutter_math_fork/**` and `dependencies/flutter_tts/**`.
+Several packages live under `dependencies/` and are referenced by path in `pubspec.yaml` (e.g. `gpt_markdown`, `mcp_client`, `flutter_tts`, `flutter_math_fork`, `downsize`). The analyzer excludes `dependencies/flutter_math_fork/**` and `dependencies/flutter_tts/**`.
 
 ## Useful commands
 

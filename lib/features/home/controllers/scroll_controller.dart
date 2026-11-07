@@ -162,21 +162,11 @@ class _IndexedScrollActivity extends ScrollActivity {
 
   final VoidCallback _onCanceled;
   bool _finishing = false;
-  bool _disposed = false;
 
   void finish() {
     if (_finishing) return;
     _finishing = true;
     delegate.goIdle();
-  }
-
-  void finishAfterDetach() {
-    // A GlobalKey move can transfer this activity to a new ScrollPosition.
-    // Wait until the subtree is active before dispatching scroll-end; a real
-    // removal disposes the activity before this callback instead.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_disposed) finish();
-    });
   }
 
   @override
@@ -190,7 +180,6 @@ class _IndexedScrollActivity extends ScrollActivity {
 
   @override
   void dispose() {
-    _disposed = true;
     if (!_finishing) _onCanceled();
     super.dispose();
   }
@@ -1094,9 +1083,9 @@ class ChatScrollController {
 
   void _cancelIndexedNavigationForDetach() {
     _indexedNavigationRequest++;
-    // Do not dispatch through a deactivated tree. If this is a reparent,
-    // finish the transferred activity once its ScrollPosition is active.
-    _indexedScrollActivity?.finishAfterDetach();
+    // ScrollPosition disposal owns the activity at this point. Calling
+    // goIdle from ListController.onDetached would dispatch a scroll-end
+    // notification through an already deactivated widget tree.
     _indexedScrollActivity = null;
     final animationController = _indexedAnimationController;
     _indexedAnimationController = null;
