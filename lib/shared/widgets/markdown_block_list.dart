@@ -4,31 +4,46 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 
-import 'incremental_markdown_document.dart';
-import 'export_capture_scope.dart';
+import '../selection/document_selection.dart';
 
 /// Retains completed Markdown subtrees. An append rebuilds and lays out only
 /// the changed leaf and its ancestors, rather than every previous paragraph.
 /// All blocks remain mounted for selection, search and interactive state.
-class MarkdownBlockList extends StatefulWidget {
-  const MarkdownBlockList({
+/// Supply immutable snapshots with an unchanged identity prefix and a replaced
+/// suffix. Changing signature rebuilds every item when layout inputs change.
+abstract interface class ViewportClipParticipant {
+  void viewportChanged();
+}
+
+class BlockList extends StatefulWidget {
+  static bool cullingEnabled(BuildContext context) =>
+      _BlockCullScope.of(context);
+  const BlockList({
     super.key,
     required this.blocks,
     required this.signature,
     required this.itemBuilder,
+    this.cullToViewport = true,
+    this.selectionSeparator = '',
   });
 
-  final List<IncrementalMarkdownBlock> blocks;
+  final List<Object> blocks;
   final Object signature;
   final IndexedWidgetBuilder itemBuilder;
 
+  /// Disable viewport clipping for image/export capture, including nested lists.
+  final bool cullToViewport;
+
+  /// Clipboard-only separators between logical blocks, including forest branches.
+  final String selectionSeparator;
+
   @override
-  State<MarkdownBlockList> createState() => _MarkdownBlockListState();
+  State<BlockList> createState() => _BlockListState();
 }
 
-class _MarkdownBlockListState extends State<MarkdownBlockList> {
+class _BlockListState extends State<BlockList> {
   final _root = _BlockForest();
-  List<IncrementalMarkdownBlock> _previous = const [];
+  List<Object> _previous = const [];
   Object? _signature;
 
   @override
@@ -75,14 +90,44 @@ class _MarkdownBlockListState extends State<MarkdownBlockList> {
     });
     final scope = context
         .dependOnInheritedWidgetOfExactType<_BlockViewportScope>();
-    if (scope != null && listEquals(scope.positions, positions)) {
-      return layout;
-    }
-    return _BlockViewportScope(
-      positions: positions,
-      child: _ViewportPaintObserver(child: layout),
+    final observed = scope != null && listEquals(scope.positions, positions)
+        ? layout
+        : _BlockViewportScope(
+            positions: positions,
+            child: _ViewportPaintObserver(child: layout),
+          );
+    return _BlockCullScope(
+      enabled: widget.cullToViewport && _BlockCullScope.of(context),
+      child: _BlockSelectionScope(
+        separator: widget.selectionSeparator,
+        child: observed,
+      ),
     );
   }
+}
+
+class _BlockSelectionScope extends InheritedWidget {
+  const _BlockSelectionScope({required this.separator, required super.child});
+  final String separator;
+  static String of(BuildContext context) =>
+      context
+          .dependOnInheritedWidgetOfExactType<_BlockSelectionScope>()
+          ?.separator ??
+      '';
+  @override
+  bool updateShouldNotify(_BlockSelectionScope oldWidget) =>
+      oldWidget.separator != separator;
+}
+
+class _BlockCullScope extends InheritedWidget {
+  const _BlockCullScope({required this.enabled, required super.child});
+  final bool enabled;
+  static bool of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_BlockCullScope>()?.enabled ??
+      true;
+  @override
+  bool updateShouldNotify(_BlockCullScope oldWidget) =>
+      oldWidget.enabled != enabled;
 }
 
 class _BlockViewportScope extends InheritedWidget {
@@ -222,14 +267,11 @@ class _BlockSelectionGroup extends StatefulWidget {
 }
 
 class _BlockSelectionGroupState extends State<_BlockSelectionGroup> {
-  final _delegate = StaticSelectionContainerDelegate();
-
+  final _delegate = DocumentSelectionDelegate(separator: '');
   @override
-  void initState() {
-    super.initState();
-    // A nested registrar may publish from a microtask after the frame. Ensure
-    // its parent gets a frame to finish registration even in a static document.
-    _delegate.addListener(WidgetsBinding.instance.ensureVisualUpdate);
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _delegate.separator = _BlockSelectionScope.of(context);
   }
 
   @override
@@ -250,7 +292,7 @@ class _BlockColumn extends MultiChildRenderObjectWidget {
 
   @override
   RenderObject createRenderObject(BuildContext context) => _RenderBlockColumn(
-    !ExportCaptureScope.of(context),
+    _BlockCullScope.of(context),
     Directionality.of(context),
   );
 
@@ -259,14 +301,14 @@ class _BlockColumn extends MultiChildRenderObjectWidget {
     BuildContext context,
     _RenderBlockColumn renderObject,
   ) {
-    renderObject.cullToViewport = !ExportCaptureScope.of(context);
+    renderObject.cullToViewport = _BlockCullScope.of(context);
     renderObject.textDirection = Directionality.of(context);
   }
 }
 
-typedef _ViewportClips = ({Rect? paint, Rect? semantics});
+typedef ViewportClips = ({Rect? paint, Rect? semantics});
 
-_ViewportClips _viewportClips(RenderBox target) {
+ViewportClips viewportClips(RenderBox target, {double paintOverflow = 32}) {
   Rect? paint;
   Rect? semantics;
   // Intersect every viewport, including a code area's horizontal viewport
@@ -286,7 +328,7 @@ _ViewportClips _viewportClips(RenderBox target) {
           transform,
           Offset.zero & box.size,
         );
-        final paintRect = rect.inflate(32);
+        final paintRect = rect.inflate(paintOverflow);
         final semanticsRect = rect.inflate(box.size.height + 250);
         paint = paint?.intersect(paintRect) ?? paintRect;
         semantics = semantics?.intersect(semanticsRect) ?? semanticsRect;
@@ -296,7 +338,7 @@ _ViewportClips _viewportClips(RenderBox target) {
   return (paint: paint, semantics: semantics);
 }
 
-class _RenderBlockColumn extends RenderFlex {
+class _RenderBlockColumn extends RenderFlex implements ViewportClipParticipant {
   _RenderBlockColumn(this._cullToViewport, TextDirection textDirection)
     : super(
         direction: Axis.vertical,
@@ -316,8 +358,8 @@ class _RenderBlockColumn extends RenderFlex {
     markNeedsSemanticsUpdate();
   }
 
-  _ViewportClips get _clips =>
-      _cullToViewport ? _viewportClips(this) : (paint: null, semantics: null);
+  ViewportClips get _clips =>
+      _cullToViewport ? viewportClips(this) : (paint: null, semantics: null);
 
   List<RenderBox> _childrenNearViewport(Rect? visible) {
     return [
@@ -372,8 +414,8 @@ class _RenderBlockColumn extends RenderFlex {
     }
     void visit(RenderObject node) {
       if (!node.attached) return;
-      if (node is _RenderBlockColumn) {
-        if (node.hasSize) node.viewportChanged();
+      if (node is RenderBox && node is ViewportClipParticipant) {
+        if (node.hasSize) (node as ViewportClipParticipant).viewportChanged();
       } else {
         node.visitChildren(visit);
       }
@@ -469,8 +511,8 @@ class _RenderViewportPaintObserver extends RenderProxyBox {
   void _refreshBlocks() {
     if (!attached || !hasSize) return;
     void visit(RenderObject node) {
-      if (node is _RenderBlockColumn) {
-        if (node.hasSize) node.viewportChanged();
+      if (node is RenderBox && node is ViewportClipParticipant) {
+        if (node.hasSize) (node as ViewportClipParticipant).viewportChanged();
       } else {
         node.visitChildren(visit);
       }

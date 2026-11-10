@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:re_editor/re_editor.dart';
 import 'dart:async';
 import '../text_input/message_editing_controller.dart';
+import 'app_text_selection_toolbar.dart';
 
 typedef LongMessageContextMenuBuilder =
     Widget Function(
@@ -11,6 +12,7 @@ typedef LongMessageContextMenuBuilder =
       TextSelectionToolbarAnchors anchors,
       List<ContextMenuButtonItem> items,
       VoidCallback onDismiss,
+      VoidCallback onNativeDismiss,
     );
 
 /// Keeps long message edits local to visible lines instead of reshaping one
@@ -73,7 +75,7 @@ class LongMessageEditorState extends State<LongMessageEditor>
   // The line editor lays out LTR lines. Keep Flutter's bidi and accessibility
   // editing paths, and preserve documents with non-LF line separators verbatim.
   static final _requiresParagraph = RegExp(
-    r'[\r\u0590-\u08ff\u200e-\u200f\u2028-\u202e\u2066-\u2069\ufb1d-\ufdff\ufe70-\ufeff\ud802-\ud803\ud83b]',
+    r'[\r\u0590-\u08ff\u200e-\u200f\u2028-\u202e\u2066-\u2069\ufb1d-\ufdff\ufe70-\ufeff\ufffc\ud802-\ud803\ud83b]',
   );
 
   late FocusNode _focus;
@@ -702,10 +704,13 @@ class LongMessageEditorState extends State<LongMessageEditor>
           anchors,
           items,
           onDismiss,
+          onDismiss,
         ) ??
-        AdaptiveTextSelectionToolbar.buttonItems(
+        AppTextSelectionToolbar(
           anchors: anchors,
           buttonItems: items,
+          selectionContext: context,
+          onDismiss: onDismiss,
         );
   }
 
@@ -840,10 +845,13 @@ class LongMessageEditorState extends State<LongMessageEditor>
                   state.contextMenuAnchors,
                   items,
                   state.hideToolbar,
+                  () => state.hideToolbar(false),
                 ) ??
-                AdaptiveTextSelectionToolbar.buttonItems(
+                AppTextSelectionToolbar(
                   anchors: state.contextMenuAnchors,
                   buttonItems: items,
+                  selectionContext: state.context,
+                  onDismiss: () => state.hideToolbar(false),
                 );
           },
           decoration: widget.decoration,

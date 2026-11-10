@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
+import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 
@@ -15,6 +16,23 @@ import '../tool_image.dart';
 /// URI (including one persisted before this check) is never a local attachment.
 class McpImageSnapshot {
   static const _prefix = 'mcp_img';
+  static final _deduplicatedName = RegExp(r'^mcp_img_[a-f0-9]{64}\.(png|jpg)$');
+
+  static bool isDeduplicatedFile(String path) =>
+      _deduplicatedName.hasMatch(p.basename(path));
+
+  /// Reusing an unreferenced preview starts a new GC grace period before its
+  /// next tool result has been checkpointed into the message asset registry.
+  static Future<File?> reuseLocalFile(String uri) async {
+    final file = await localFile(uri);
+    if (file == null) return null;
+    try {
+      await file.setLastModified(DateTime.now());
+      return file;
+    } on FileSystemException {
+      return null;
+    }
+  }
 
   static Future<String?> save(String data) async {
     final cancellation = ToolCallCancellation.current;
@@ -24,28 +42,76 @@ class McpImageSnapshot {
       if (cleaned.length > ((ToolImage.maxFileBytes + 2) ~/ 3) * 4) {
         return null;
       }
-      final bytes = base64Decode(cleaned);
-      final image = await ToolImage.fromBytes(bytes);
-      return await _store(image);
+      return (await saveBytes(base64Decode(cleaned)))?.uri;
     } catch (_) {
       cancellation?.throwIfCancelled();
       return null;
     }
   }
 
-  static Future<String> _store(ToolImage image) async {
+  /// Return the stored dimensions so screenshot coordinates describe the
+  /// bounded image sent to the model, rather than the original native bitmap.
+  static Future<({String uri, int width, int height})?> saveBytes(
+    Uint8List bytes, {
+    bool deduplicate = false,
+  }) async {
+    final cancellation = ToolCallCancellation.current;
+    cancellation?.throwIfCancelled();
+    try {
+      final image = await ToolImage.fromBytes(bytes);
+      final uri = await _store(image, deduplicate: deduplicate);
+      return (uri: uri, width: image.width, height: image.height);
+    } catch (_) {
+      cancellation?.throwIfCancelled();
+      return null;
+    }
+  }
+
+  static Future<String> _store(
+    ToolImage image, {
+    bool deduplicate = false,
+  }) async {
     final cancellation = ToolCallCancellation.current;
     cancellation?.throwIfCancelled();
     final directory = await AppDirectories.getImagesDirectory();
     await directory.create(recursive: true);
     final extension = image.mime == 'image/png' ? 'png' : 'jpg';
-    final file = File(
-      p.join(directory.path, '${_prefix}_${const Uuid().v4()}.$extension'),
-    );
+    final id = deduplicate
+        ? sha256.convert(image.bytes).toString()
+        : const Uuid().v4();
+    final target = File(p.join(directory.path, '${_prefix}_$id.$extension'));
+    if (deduplicate && await target.exists()) {
+      try {
+        await target.setLastModified(DateTime.now());
+        cancellation?.throwIfCancelled();
+        return SandboxPathResolver.canonicalize(target.path);
+      } on FileSystemException {
+        // GC may have isolated the old file between exists and reuse.
+        if (await target.exists()) rethrow;
+      }
+    }
+    // Publish content-addressed previews atomically. A cancelled concurrent
+    // save must never delete an existing image owned by another message.
+    final file = deduplicate
+        ? File(p.join(directory.path, '${_prefix}_${const Uuid().v4()}.tmp'))
+        : target;
     try {
       await file.writeAsBytes(image.bytes, flush: true);
       cancellation?.throwIfCancelled();
-      return SandboxPathResolver.canonicalize(file.path);
+      if (deduplicate) {
+        if (await target.exists()) {
+          await file.delete();
+        } else {
+          try {
+            await file.rename(target.path);
+          } on FileSystemException {
+            if (!await target.exists()) rethrow;
+            await file.delete();
+          }
+        }
+        await target.setLastModified(DateTime.now());
+      }
+      return SandboxPathResolver.canonicalize(target.path);
     } catch (_) {
       if (await file.exists()) await file.delete();
       rethrow;
@@ -117,21 +183,117 @@ class McpImageSnapshot {
     }
   }
 
-  /// Read current snapshots or URL-only results. Historical URLs are fetched
-  /// in memory; only the tool execution that persists a URI saves a new file.
-  static Future<String?> readDataUrl(String uri) async {
+  /// Share URL materialization without sharing a generation's cancellation.
+  /// A surviving reader retries an aborted owner's read through the same slot.
+  static final _urlReads =
+      <String, ({Future<String?> future, ToolCallCancellation? owner})>{};
+
+  static Future<String?> readDataUrl(String uri, {String? cacheKey}) async {
+    if (cacheKey == null ||
+        !(uri.startsWith('http://') || uri.startsWith('https://'))) {
+      return _readDataUrl(uri, cacheKey: cacheKey);
+    }
+    final cancellation = ToolCallCancellation.current;
+    final key = '$cacheKey|$uri';
+    while (true) {
+      cancellation?.throwIfCancelled();
+      final existing = _urlReads[key];
+      if (existing != null) {
+        try {
+          final result = await (cancellation == null
+              ? existing.future
+              : Future.any<String?>([
+                  existing.future,
+                  cancellation.cancelled.then<String?>((_) {
+                    cancellation.throwIfCancelled();
+                    return null;
+                  }),
+                ]));
+          cancellation?.throwIfCancelled();
+          return result;
+        } catch (_) {
+          cancellation?.throwIfCancelled();
+          var ownerCancelled = false;
+          try {
+            existing.owner?.throwIfCancelled();
+          } on StateError {
+            ownerCancelled = true;
+          }
+          if (!ownerCancelled) rethrow;
+          // Another survivor may already have installed the retry. Never
+          // remove that new slot or start an independent competing download.
+          if (identical(_urlReads[key]?.future, existing.future)) {
+            _urlReads.remove(key);
+          }
+          continue;
+        }
+      }
+      final read = _readDataUrl(uri, cacheKey: cacheKey);
+      _urlReads[key] = (future: read, owner: cancellation);
+      try {
+        final result = await read;
+        cancellation?.throwIfCancelled();
+        return result;
+      } finally {
+        if (identical(_urlReads[key]?.future, read)) _urlReads.remove(key);
+      }
+    }
+  }
+
+  static Future<String?> _readDataUrl(String uri, {String? cacheKey}) async {
     final cancellation = ToolCallCancellation.current;
     cancellation?.throwIfCancelled();
     try {
       final parsed = Uri.tryParse(uri);
       if (parsed?.isScheme('http') == true ||
           parsed?.isScheme('https') == true) {
+        final cache = cacheKey == null
+            ? null
+            : File(
+                p.join(
+                  (await AppDirectories.getCacheDirectory()).path,
+                  'image_context',
+                  sha256.convert(utf8.encode('$cacheKey|$uri')).toString(),
+                ),
+              );
+        if (cache != null && await cache.exists()) {
+          return await cache.readAsString();
+        }
         final bytes = await _fetch(uri);
         if (bytes == null) return null;
         final image = await ToolImage.fromBytes(bytes);
         cancellation?.throwIfCancelled();
-        return 'data:${image.mime};base64,${base64Encode(image.bytes)}';
+        final data = 'data:${image.mime};base64,${base64Encode(image.bytes)}';
+        if (cache != null) {
+          await cache.parent.create(recursive: true);
+          final temporary = File('${cache.path}.${const Uuid().v4()}.tmp');
+          try {
+            await temporary.writeAsString(data, flush: true);
+            if (!await cache.exists()) {
+              await temporary.rename(cache.path);
+            }
+          } finally {
+            if (await temporary.exists()) await temporary.delete();
+          }
+          return await cache.readAsString();
+        }
+        return data;
       }
+      final file = await localFile(uri);
+      if (file == null) return null;
+      final image = await ToolImage.read(file.path);
+      cancellation?.throwIfCancelled();
+      return 'data:${image.mime};base64,${base64Encode(image.bytes)}';
+    } catch (_) {
+      cancellation?.throwIfCancelled();
+      return null;
+    }
+  }
+
+  /// Resolve a client-owned snapshot for local UI display without loading its
+  /// full pixels into Dart or fetching a URL supplied by a page/tool result.
+  static Future<File?> localFile(String uri) async {
+    try {
       final path = SandboxPathResolver.resolveForIo(uri);
       if (path == null || !p.basename(path).startsWith('${_prefix}_')) {
         return null;
@@ -143,11 +305,8 @@ class McpImageSnapshot {
           !p.basename(resolved).startsWith('${_prefix}_')) {
         return null;
       }
-      final image = await ToolImage.read(resolved);
-      cancellation?.throwIfCancelled();
-      return 'data:${image.mime};base64,${base64Encode(image.bytes)}';
+      return File(resolved);
     } catch (_) {
-      cancellation?.throwIfCancelled();
       return null;
     }
   }
